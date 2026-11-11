@@ -95,4 +95,48 @@ def test_iter_file_throttles(tmp_path):
         now[0] += s
 
     out = b"".join(iter_file(str(p), 0, 8, clock=lambda: now[0], sleep=sleep))
-    assert out == content and sum(slept) >= 2.0
+    assert out == content and sum(slept) >= 1.0  # last chunk is not waited for
+
+
+def test_size_comes_from_disk(env, jid):
+    c, jobs = env
+    jobs.lib(jobs.store.get(jid).item).units(None)[0].file.size = 5000  # recorded size lies
+    r = c.get(f"/v1/requests/{jid}/files/0", headers={**H, "Range": "bytes=600-"})
+    assert r.headers["content-range"] == "bytes 600-999/1000" and r.headers["content-length"] == "400"
+    assert c.get(f"/v1/requests/{jid}/files/0", headers={**H, "Range": "bytes=1000-"}).status_code == 416
+    assert jobs.transfer[jid] == (1000, 1000)
+
+
+def test_early_close_reports_only_yielded_and_closes_file(env, tmp_path):
+    from availarr.server.api import _stream
+    jobs = env[1]
+    p = tmp_path / "Dune.mkv"
+    g = _stream(jobs, 7, str(p), 0, 1000, 0, chunk=100)
+    next(g)
+    assert 7 not in jobs.transfer
+    next(g)
+    assert jobs.transfer[7] == (100, 1000)
+    g.close()
+    p.unlink()  # fails on Windows if the handle is still open
+    assert jobs.transfer[7] == (100, 1000)
+
+
+def test_transfer_keeps_max(env, jid):
+    from availarr.server.api import _stream
+    c, jobs = env
+    c.get(f"/v1/requests/{jid}/files/0", headers=H)
+    c.get(f"/v1/requests/{jid}/files/0", headers={**H, "Range": "bytes=900-"})
+    assert jobs.transfer[jid] == (1000, 1000)
+    path = jobs.file_path(jobs.store.get(jid), 0)[0]
+    g = _stream(jobs, jid, path, 0, 1000, 0, chunk=100)
+    next(g); next(g); g.close()
+    assert jobs.transfer[jid] == (1000, 1000)
+
+
+def test_no_sleep_after_last_chunk(tmp_path):
+    from availarr.server.api import iter_file
+    p = tmp_path / "f"
+    p.write_bytes(b"x" * 100)
+    slept = []
+    list(iter_file(str(p), 0, 8, chunk=100, clock=lambda: 0.0, sleep=slept.append))
+    assert slept == []

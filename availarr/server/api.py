@@ -1,3 +1,4 @@
+import os
 import re
 import secrets
 import time
@@ -31,11 +32,23 @@ def iter_file(path: str, start: int, mbps: float, chunk: int = 1 << 20,
     t0, sent, rate = clock(), 0, mbps * 125_000
     with open(path, "rb") as f:
         f.seek(start)
-        while data := f.read(chunk):
-            sent += len(data)
-            yield data
-            if rate > 0 and (wait := sent / rate - (clock() - t0)) > 0:
-                sleep(wait)
+        end = os.fstat(f.fileno()).st_size
+        try:
+            while data := f.read(chunk):
+                sent += len(data)
+                yield data
+                if start + sent < end and rate > 0 and (wait := sent / rate - (clock() - t0)) > 0:
+                    sleep(wait)
+        finally:
+            f.close()
+
+
+def _stream(jobs: Jobs, id: int, path: str, start: int, size: int, mbps: float, chunk: int = 1 << 20):
+    pos = start
+    for data in iter_file(path, start, mbps, chunk):
+        pos += len(data)
+        yield data
+        jobs.transfer[id] = (max(pos, jobs.transfer.get(id, (0, 0))[0]), size)
 
 
 def _item(key: str) -> Item:
@@ -76,8 +89,9 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
     @app.get("/v1/requests/{id}/files/{index}")
     def file(id: int, index: int, request: Request):
         try:
-            path, size = jobs.file_path(jobs.refresh(job_or_404(id)), index)
-        except IndexError:
+            path, _ = jobs.file_path(jobs.refresh(job_or_404(id)), index)
+            size = os.stat(path).st_size  # the disk is the truth, not the recorded size
+        except (IndexError, OSError):
             raise HTTPException(404, "unknown file")
         start, status_code = 0, 200
         if m := re.fullmatch(r"bytes=(\d+)-", request.headers.get("range", "")):
@@ -88,14 +102,7 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
         if status_code == 206:
             headers["Content-Range"] = f"bytes {start}-{size - 1}/{size}"
 
-        def body():
-            pos = start
-            for data in iter_file(path, start, cfg.bandwidth_mbps):
-                pos += len(data)
-                jobs.transfer[id] = (max(pos, jobs.transfer.get(id, (0, 0))[0]), size)
-                yield data
-
-        return StreamingResponse(body(), status_code=status_code, headers=headers,
+        return StreamingResponse(_stream(jobs, id, path, start, size, cfg.bandwidth_mbps), status_code=status_code, headers=headers,
                                  media_type="application/octet-stream")
 
     @app.post("/v1/requests/{id}/close", status_code=204)

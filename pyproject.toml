@@ -15,4 +15,4 @@ dev = ["pytest>=8"]
 packages = ["availarr", "availarr.server", "availarr.agent"]
 
 [tool.pytest.ini_options]
-filterwarnings = ["ignore::DeprecationWarning", "ignore:Using .httpx. with:Warning"]
+filterwarnings = ["ignore::DeprecationWarning:starlette.*", "ignore::DeprecationWarning:anyio.*", "ignore:Using .httpx. with:Warning:fastapi.testclient"]
