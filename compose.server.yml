@@ -4,10 +4,14 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "8787:8787"   # API, consommée par l'agent de B
-      - "8788:8788"   # panel (réseau local / Tailscale de A uniquement)
+      # API (HTTP + token) : lier à l'IP tailscale0 de A (TAILSCALE_IP), ou n'exposer
+      # que derrière un reverse proxy HTTPS / un pare-feu.
+      - "${TAILSCALE_IP:-127.0.0.1}:8787:8787"
+      # Panel : local uniquement. Pour l'ouvrir sur le LAN, remplacer 127.0.0.1 par l'IP LAN de A
+      # (ex. "192.168.1.10:8788:8788"). Ne jamais l'exposer à B.
+      - "127.0.0.1:8788:8788"
     volumes:
       - ./config:/config:ro
-      - ./data:/data   # pr�parer : mkdir -p data && sudo chown 1000:1000 data
+      - ./data:/data   # préparer : mkdir -p data && sudo chown 1000:1000 data
       # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
       - /media:/media:ro

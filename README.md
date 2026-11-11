@@ -17,8 +17,8 @@ Availarr permet à B d'utiliser la médiathèque de A comme source de téléchar
 
 1. Copier `examples/server.toml` vers `./config/server.toml` et le remplir (clés Radarr/Sonarr, qBittorrent, `token`, `admin_password`, table `[profiles]`).
 2. Dans `compose.server.yml`, monter le dossier des médias de A **au même chemin** que dans le Radarr/Sonarr de A (le server lit les fichiers à ce chemin).
-3. Pr�parer les dossiers (le conteneur tourne en uid 1000) : `mkdir -p config data && sudo chown 1000:1000 data`.
-4. D�finir `TAILSCALE_IP` (IP `tailscale0` de A) : l'API (HTTP + token) n'est publi�e que sur cette IP (par d�faut `127.0.0.1`). Lier � l'IP tailscale0 ou filtrer le port 8787 au pare-feu, sauf si un reverse proxy HTTPS le pr�c�de. Le panel est li� � `127.0.0.1:8788` ; pour le LAN, voir le commentaire de `compose.server.yml`.
+3. Préparer les dossiers (le conteneur tourne en uid 1000) : `mkdir -p config data && sudo chown 1000:1000 data`.
+4. Définir `TAILSCALE_IP` (IP `tailscale0` de A) : l'API (HTTP + token) n'est publiée que sur cette IP (par défaut `127.0.0.1`). Lier à l'IP tailscale0 ou filtrer le port 8787 au pare-feu, sauf si un reverse proxy HTTPS le précède. Le panel est lié à `127.0.0.1:8788` ; pour le LAN, voir le commentaire de `compose.server.yml`.
 5. `docker compose -f compose.server.yml up -d --build`
 
 Le fichier de config est lu depuis `/config/server.toml` (variable `AVAILARR_CONFIG` pour changer). Ports : **8787** API (pour l'agent), **8788** panel (local).
@@ -27,7 +27,8 @@ Le fichier de config est lu depuis `/config/server.toml` (variable `AVAILARR_CON
 
 1. Copier `examples/agent.toml` vers `./config/agent.toml` et le remplir (`server_url`, `token` identique à celui du server, `api_key` au choix, `public_url`, `complete_dir`, clés du Radarr/Sonarr de B).
 2. Monter le dossier de téléchargements de B sur `complete_dir`. Le conteneur tourne en utilisateur non-root (uid 1000) : ce dossier doit lui être accessible en écriture.
-3. `docker compose -f compose.agent.yml up -d --build`
+3. `mkdir -p config data && sudo chown 1000:1000 data`, et `sudo chown 1000:1000` sur le dossier de téléchargements.
+4. `docker compose -f compose.agent.yml up -d --build`
 
 Sans Docker : `pip install .` puis `python -m availarr.server` ou `python -m availarr.agent`.
 
@@ -60,7 +61,7 @@ Le **panel (8788) ne doit jamais être exposé à B** : il est protégé par `ad
 | API Key | la valeur `api_key` de `agent.toml` |
 | Catégorie | `radarr` ou `sonarr` |
 
-Le nom `availarr-agent` ne se r�sout que si Radarr/Sonarr de B partagent le r�seau Docker de l'agent ; sinon utiliser l'IP de l'h�te de B.
+Le nom `availarr-agent` ne se résout que si Radarr/Sonarr de B partagent le réseau Docker de l'agent ; sinon utiliser l'IP de l'hôte de B.
 
 Si le chemin de `complete_dir` vu par l'agent diffère de celui vu par Radarr/Sonarr, ajouter un **Remote Path Mapping** (Settings > Download Clients).
 
@@ -80,7 +81,7 @@ Un profil de B sans correspondance provoque une erreur visible dans le panel. Il
 
 ## Rétention
 
-Un titre livré à B est supprimé de A (si c'est A qui l'avait téléchargé pour B) **7 jours après la livraison** (`keep_days`) **et** après **3 jours de seed réel** dans qBittorrent (`seed_days`). Le panel affiche « dans 7 j » et le temps de seed.
+Un titre livré à B est supprimé de A (si c'est A qui l'avait téléchargé pour B) **7 jours après la clôture (livraison ou annulation)** (`keep_days`) **et** après **3 jours de seed réel** dans qBittorrent (`seed_days`). Le panel affiche « dans 7 j » et le temps de seed.
 
 - 🔒 **Protégé** : A possédait déjà le titre, il n'est jamais supprimé.
 - 📌 **Gardé** : A a demandé dans le panel de conserver le titre.

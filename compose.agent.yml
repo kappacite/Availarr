@@ -8,6 +8,6 @@ services:
       - "8789:8789"
     volumes:
       - ./config:/config:ro
-      - ./data:/data   # pr�parer : mkdir -p data && sudo chown 1000:1000 data
+      - ./data:/data   # préparer : mkdir -p data && sudo chown 1000:1000 data
       # Dossier de téléchargements de B (complete_dir de agent.toml) ; sudo chown 1000:1000 sur ce dossier
       - /downloads:/downloads
