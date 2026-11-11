@@ -6,8 +6,13 @@ from typing import Callable
 import httpx
 
 from availarr.agent.db import AgentStore
+from availarr.common import Item
 
 log = logging.getLogger(__name__)
+
+
+def _key(item: Item | str) -> str:
+    return item.key() if isinstance(item, Item) else item
 
 
 class ServerClient:
@@ -20,11 +25,12 @@ class ServerClient:
         r.raise_for_status()
         return r
 
-    def lookup(self, item: str, b_profile: str) -> dict | None:
-        return self._call("POST", "/v1/lookup", json={"item": item, "b_profile": b_profile}).json()["release"]
+    def lookup(self, item: Item | str, b_profile: str) -> dict | None:
+        body = {"item": _key(item), "b_profile": b_profile}
+        return self._call("POST", "/v1/lookup", json=body).json()["release"]
 
-    def request(self, item: str, b_profile: str, title: str) -> int:
-        body = {"item": item, "b_profile": b_profile, "release_title": title}
+    def request(self, item: Item | str, b_profile: str, title: str) -> int:
+        body = {"item": _key(item), "b_profile": b_profile, "release_title": title}
         return self._call("POST", "/v1/requests", json=body).json()["job_id"]
 
     def status(self, job_id: int) -> dict:
