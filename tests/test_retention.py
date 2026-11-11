@@ -165,3 +165,20 @@ def test_keep_set_during_eligibility_is_honoured(env):
     q = FlipQbit({})
     assert tick(jobs, q, 100 * D) == [] and lib.removed == [] and q.deleted == []
     assert jobs.store.get(j.id).deleted_at is None
+
+
+def test_keep_set_during_second_check_is_honoured(env):
+    jobs, lib, qbit, mk = env
+    j = mk()
+
+    class FlipQbit(FakeQbit):
+        calls = 0
+
+        def seeding_seconds(self, h):
+            self.calls += 1
+            if self.calls == 2:  # the second eligibility round
+                jobs.store.set(j.id, decision="keep")
+            return 9 * D
+    q = FlipQbit({})
+    assert tick(jobs, q, 100 * D) == [] and lib.removed == [] and q.deleted == []
+    assert q.calls == 2 and jobs.store.get(j.id).deleted_at is None

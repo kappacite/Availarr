@@ -50,8 +50,11 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
             drop = job.added_by_tool and not job.protected_units and not any(
                 o.id != job.id and o.deleted_at is None and _shares_entry(job, o) for o in all_jobs)
             keys = [u for u in job.units if u not in job.protected_units]
-            job = jobs.store.get(job.id)  # last look right before the irreversible part
+            job = jobs.store.get(job.id)
             if not _eligible(job, qbit, now, jobs.cfg.keep_days, jobs.cfg.seed_days):
+                continue
+            last = jobs.store.get(job.id)  # no network call between this read and remove()
+            if last.decision == "keep" or last.deleted_at is not None:
                 continue
             jobs.lib(job.item).remove(job.item, keys, drop)
             for h in job.hashes:

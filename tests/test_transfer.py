@@ -223,3 +223,17 @@ def test_progress_write_never_resurrects_cancelled(env):
 def test_server_client_has_read_timeout():
     t = ServerClient("http://x", "t").client.timeout
     assert (t.read, t.connect) == (300, 30)
+
+
+def test_close_retry_error_does_not_abort_step(env, monkeypatch):
+    env.add("completed")
+    env.store.add(AgentJob("n2", env.jid, "t", "radarr", "cancelled", 1, 0.0, 0, str(env.dir), None, False, 1.0))
+    seen = []
+
+    def close(jid, outcome):
+        seen.append(outcome)
+        if outcome == "delivered":
+            raise RuntimeError("weird")
+    monkeypatch.setattr(env.server, "close", close)
+    step(env.store, env.server)
+    assert seen == ["delivered", "cancelled"] and not env.job().reported and env.store.get("n2").reported

@@ -46,8 +46,10 @@ class Jobs:
 
     def _request(self, item: Item, b_profile: str, release_title: str) -> Job:
         if job := self.store.active_for(item):
-            # B grabs it again: a fresh transfer, so the old close/decision must not delete it mid-way
-            self.store.set(job.id, closed_at=None, outcome=None, decision="none")
+            # B grabs it again: a fresh transfer, so the old close/"delete" must not delete it mid-way; "keep" stays
+            self.store.set(job.id, closed_at=None, outcome=None)
+            if job.decision == "delete":
+                self.store.set(job.id, decision="none")
             return self.store.get(job.id)
         req = self.requirement(b_profile)
         if req is None:

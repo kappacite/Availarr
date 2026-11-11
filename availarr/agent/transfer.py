@@ -87,7 +87,7 @@ def step(store: AgentStore, server: ServerClient) -> None:
             try:
                 server.close(j.server_job_id, "delivered" if j.state == "completed" else "cancelled")
                 store.set_reported(j.nzo_id)
-            except httpx.HTTPError as e:
+            except Exception as e:  # noqa: BLE001 - one bad close must not abort the step
                 log.warning("job %s: close: %s", j.nzo_id, e)
     for j in store.active():
         try:

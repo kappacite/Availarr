@@ -170,3 +170,19 @@ def test_deleted_job_reports_failed_and_no_files(mk):
     assert j.status(job) == {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
     with pytest.raises(IndexError):
         j.file_path(job, 0)
+
+
+def test_reuse_keeps_keep_decision(mk, clock):
+    from availarr.server.retention import tick
+    from tests.fakes import FakeQbit
+    lib = FakeLibrary([NONE])
+    j = mk(lib)
+    a = j.request(M, P, "T")
+    j.store.set(a.id, decision="keep")
+    j.request(M, P, "T")
+    assert j.store.get(a.id).decision == "keep"
+    lib.units = [Unit("movie:603", True, True, GOOD)]
+    j.refresh(j.store.get(a.id))
+    j.close(j.store.get(a.id), "delivered")
+    q = FakeQbit({})
+    assert tick(j, q, 10**9) == [] and lib.removed == [] and j.store.get(a.id).deleted_at is None
