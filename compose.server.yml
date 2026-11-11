@@ -1,0 +1,13 @@
+# Côté A : API (8787) + panel (8788). Le panel ne doit PAS être exposé à B.
+services:
+  availarr-server:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"   # API, consommée par l'agent de B
+      - "8788:8788"   # panel (réseau local / Tailscale de A uniquement)
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data
+      # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
+      - /media:/media:ro
