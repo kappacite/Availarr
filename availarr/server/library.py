@@ -1,0 +1,23 @@
+from dataclasses import dataclass
+from typing import Protocol
+
+from availarr.common import Item
+from availarr.server.quality import FileInfo
+
+
+@dataclass
+class Unit:
+    key: str  # "movie:<tmdb>" or "episode:<tvdb>:<s>:<e>"; item.key() if the entry is absent
+    exists: bool
+    monitored: bool
+    file: FileInfo | None
+
+
+class Library(Protocol):
+    def units(self, item: Item) -> list[Unit]: ...
+    def title(self, item: Item) -> tuple[str, int | None]: ...
+    def profile_name(self, item: Item) -> str | None: ...
+    def ensure(self, item: Item, profile: str, change_profile: bool) -> bool: ...
+    def progress(self, item: Item) -> float: ...
+    def hashes(self, item: Item, since: float) -> list[str]: ...
+    def remove(self, item: Item, unit_keys: list[str], drop_entry: bool) -> None: ...
