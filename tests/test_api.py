@@ -138,5 +138,7 @@ def test_no_sleep_after_last_chunk(tmp_path):
     p = tmp_path / "f"
     p.write_bytes(b"x" * 100)
     slept = []
-    list(iter_file(str(p), 0, 8, chunk=100, clock=lambda: 0.0, sleep=slept.append))
-    assert slept == []
+    g = iter_file(str(p), 0, 8, chunk=100, clock=lambda: 0.0, sleep=slept.append)
+    next(g)
+    n = len(slept)
+    assert list(g) == [] and len(slept) == n  # paced before the chunk, nothing after it
