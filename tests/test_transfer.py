@@ -129,3 +129,58 @@ def test_step_survives_network_error(env, monkeypatch):
     monkeypatch.setattr(env.server, "status", boom)
     step(env.store, env.server)
     assert env.job().state == "queued"
+
+
+def _cancel(env):
+    j = env.job()
+    j.state = "cancelled"
+    env.store.update(j)
+
+
+def test_step_skips_cancelled(env):
+    env.add()
+    _cancel(env)
+    step(env.store, env.server)
+    assert env.job().state == "cancelled" and not (env.dir / "Dune.mkv").exists()
+    assert env.jobs.store.get(env.jid).outcome is None
+
+
+def test_step_cancel_during_download(env, monkeypatch):
+    env.add()
+    real = env.server.download
+
+    def dl(jid, idx, dest, size, cb):
+        def hook(n):
+            _cancel(env)
+            cb(n)
+        real(jid, idx, dest, size, hook)
+    monkeypatch.setattr(env.server, "download", dl)
+    step(env.store, env.server)
+    assert env.job().state == "cancelled"
+    assert env.jobs.store.get(env.jid).outcome is None
+
+
+def test_download_oversized_part_restarts(env):
+    env.dir.mkdir()
+    (env.dir / "Dune.mkv.part").write_bytes(DATA + b"junk")
+    env.server.download(env.jid, 0, env.dir / "Dune.mkv", 1000, lambda n: None)
+    assert (env.dir / "Dune.mkv").read_bytes() == DATA
+
+
+def test_download_200_to_range_truncates(env, monkeypatch):
+    env.dir.mkdir()
+    (env.dir / "Dune.mkv.part").write_bytes(b"x" * 400)
+    orig = env.server.client.stream
+
+    def stream(method, url, headers=None, **kw):
+        return orig(method, url, headers={k: v for k, v in headers.items() if k != "Range"}, **kw)
+    monkeypatch.setattr(env.server.client, "stream", stream)
+    env.server.download(env.jid, 0, env.dir / "Dune.mkv", 1000, lambda n: None)
+    assert (env.dir / "Dune.mkv").read_bytes() == DATA
+
+
+def test_step_malformed_status_survives(env, monkeypatch):
+    env.add()
+    monkeypatch.setattr(env.server, "status", lambda i: {})
+    step(env.store, env.server)
+    assert env.job().state == "queued"
