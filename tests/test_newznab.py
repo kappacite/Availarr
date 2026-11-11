@@ -102,3 +102,34 @@ def test_nzb_endpoint():
     assert parse_nzb(r.content) == payload
     assert c.get("/newznab/nzb", params={"apikey": "K", "p": "!!"}).status_code == 400
     assert 'code="100"' in c.get("/newznab/nzb", params={"apikey": "bad", "p": p}).text
+
+
+def test_non_int_params_give_empty_rss_not_422():
+    s = FakeServer(REL)
+    c = client(s)
+    for params in ({"t": "tvsearch", "tvdbid": 1, "season": "", "ep": "11/11"},
+                   {"t": "tvsearch", "tvdbid": "x", "season": 1},
+                   {"t": "movie", "tmdbid": "abc"}):
+        r = c.get("/newznab/api", params={**params, "apikey": "K"})
+        assert r.status_code == 200 and items(r) == []
+    assert s.calls == []
+    c.get("/newznab/api", params={"t": "tvsearch", "tvdbid": 1, "season": 2, "ep": "11/11", "apikey": "K"})
+    assert s.calls == [Item("season", 1, 2)]
+
+
+def test_nzb_bad_payload_shapes_400():
+    c = client(FakeServer(REL))
+    for obj in ([1], {"item": "x"}, 5):
+        p = base64.urlsafe_b64encode(json.dumps(obj).encode()).decode()
+        assert c.get("/newznab/nzb", params={"apikey": "K", "p": p}).status_code == 400
+
+
+def test_lookup_value_error_empty_and_link_quoting():
+    r = client(FakeServer(exc=ValueError("x"))).get("/newznab/api", params={"t": "movie", "tmdbid": 1, "apikey": "K"})
+    assert items(r) == []
+    cfg = AgentConfig(server_url="u", token="t", api_key="a&b", public_url="http://h/", complete_dir="/c",
+                      radarr_url="", radarr_key="", sonarr_url="", sonarr_key="")
+    app = FastAPI()
+    app.include_router(router(cfg, FakeServer(REL), FakeB()))
+    r = TestClient(app).get("/newznab/api", params={"t": "movie", "tmdbid": 1, "apikey": "a&b"})
+    assert items(r)[0].find("link").text.startswith("http://h/newznab/nzb?apikey=a%26b&p=")

@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import secrets
+from urllib.parse import quote
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -21,6 +22,13 @@ _CAPS = (
     '<movie-search available="yes" supportedParams="q,tmdbid"/></searching>'
     '<categories><category id="2000" name="Movies"/><category id="5000" name="TV"/></categories></caps>'
 )
+
+
+def _int(v) -> int | None:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _xml(body: str | bytes, media="application/xml") -> Response:
@@ -53,29 +61,30 @@ def router(cfg, server, b) -> APIRouter:
         try:
             prof = b.b_profile(item)
             found = server.lookup(item, prof)
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, ValueError, KeyError) as e:
             log.warning("lookup failed for %s: %s", item.key(), e)
             return []
         if not found:
             return []
         payload = {"item": item.key(), "b_profile": prof, "title": found["title"], "size": found["size"]}
         p = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
-        link = f"{cfg.public_url}/newznab/nzb?apikey={cfg.api_key}&p={p}"
+        link = f"{cfg.public_url.rstrip('/')}/newznab/nzb?apikey={quote(cfg.api_key, safe='')}&p={p}"
         return [{"title": found["title"], "guid": item.key() + " " + found["title"], "link": link,
                  "size": found["size"], "cat": 2000 if item.kind == "movie" else 5000}]
 
     @r.get("/newznab/api")
-    def api(t: str = "", apikey: str = "", tmdbid: int | None = None, tvdbid: int | None = None,
-            season: int | None = None, ep: int | None = None):
+    def api(t: str = "", apikey: str = "", tmdbid: str | None = None, tvdbid: str | None = None,
+            season: str | None = None, ep: str | None = None):
         if t == "caps":
             return _xml(_CAPS)
         if not ok(apikey):
             return _xml(_ERR)
         item = None
-        if t == "movie" and tmdbid:
-            item = Item("movie", tmdbid)
-        elif t == "tvsearch" and tvdbid and season is not None:
-            item = Item("season", tvdbid, season) if ep is None else Item("episode", tvdbid, season, ep)
+        tmdb, tvdb, sn, epn = _int(tmdbid), _int(tvdbid), _int(season), _int(ep)
+        if t == "movie" and tmdb:
+            item = Item("movie", tmdb)
+        elif t == "tvsearch" and tvdb and sn is not None:
+            item = Item("season", tvdb, sn) if epn is None else Item("episode", tvdb, sn, epn)
         return _rss(release(item) if item else [])
 
     @r.get("/newznab/nzb")
@@ -84,7 +93,8 @@ def router(cfg, server, b) -> APIRouter:
             return _xml(_ERR)
         try:
             payload = json.loads(base64.urlsafe_b64decode(p))
-        except ValueError:
+            payload["item"], payload["b_profile"], payload["title"], payload["size"]
+        except (ValueError, KeyError, TypeError):
             return Response("bad payload", status_code=400)
         return _xml(build_nzb(payload), "application/x-nzb")
 
