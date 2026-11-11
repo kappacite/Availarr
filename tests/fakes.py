@@ -59,3 +59,6 @@ class FakeQbit:
 
     def seeding_seconds(self, h):
         return self.seed.get(h)
+
+    def delete(self, h):
+        self.deleted.append(h)
