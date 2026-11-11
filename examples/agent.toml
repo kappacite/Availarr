@@ -1,0 +1,17 @@
+server_url = "https://availarr.example.com"   # server at A
+token = "change-me"                            # shared with the server
+api_key = "change-me-too"                      # B's Radarr/Sonarr use this as indexer/SAB api key
+public_url = "http://availarr-agent:8789"      # how B's Radarr/Sonarr reach this agent
+complete_dir = "/downloads/complete"
+# port = 8789
+# db_path = "/data/agent.db"
+# categories = ["radarr", "sonarr", "tv", "movies"]
+# poll_seconds = 30
+
+[radarr]   # B's instances
+url = "http://radarr:7878"
+key = "radarr-api-key"
+
+[sonarr]
+url = "http://sonarr:8989"
+key = "sonarr-api-key"
