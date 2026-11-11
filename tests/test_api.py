@@ -95,7 +95,7 @@ def test_iter_file_throttles(tmp_path):
         now[0] += s
 
     out = b"".join(iter_file(str(p), 0, 8, clock=lambda: now[0], sleep=sleep))
-    assert out == content and sum(slept) >= 1.0  # last chunk is not waited for
+    assert out == content and sum(slept) >= 2.0
 
 
 def test_size_comes_from_disk(env, jid):

@@ -32,13 +32,12 @@ def iter_file(path: str, start: int, mbps: float, chunk: int = 1 << 20,
     t0, sent, rate = clock(), 0, mbps * 125_000
     with open(path, "rb") as f:
         f.seek(start)
-        end = os.fstat(f.fileno()).st_size
         try:
             while data := f.read(chunk):
                 sent += len(data)
+                if rate > 0 and (wait := sent / rate - (clock() - t0)) > 0:
+                    sleep(wait)  # pace before yielding so the limit holds, nothing after the last byte
                 yield data
-                if start + sent < end and rate > 0 and (wait := sent / rate - (clock() - t0)) > 0:
-                    sleep(wait)
         finally:
             f.close()
 
