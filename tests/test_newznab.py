@@ -81,7 +81,8 @@ def test_rss_without_id_returns_one_placeholder():
     s = FakeServer(REL)
     c = client(s)
     for t in ("movie", "tvsearch", "search"):
-        (it,) = items(c.get("/newznab/api", params={"t": t, "q": "x", "apikey": "K"}))
+        assert items(c.get("/newznab/api", params={"t": t, "q": "Guardians 2014", "apikey": "K"})) == []
+        (it,) = items(c.get("/newznab/api", params={"t": t, "apikey": "K"}))
         assert it.find("title").text == "Availarr.Placeholder-Availarr"
         assert it.find("enclosure").get("length") == "1"
         p = it.find("link").text.split("&p=")[1]

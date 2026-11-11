@@ -81,14 +81,16 @@ def router(cfg, server, b) -> APIRouter:
                 "size": 1, "cat": 5000 if t == "tvsearch" else 2000}
 
     @r.get("/newznab/api")
-    def api(t: str = "", apikey: str = "", tmdbid: str | None = None, tvdbid: str | None = None,
+    def api(t: str = "", apikey: str = "", q: str = "", tmdbid: str | None = None, tvdbid: str | None = None,
             season: str | None = None, ep: str | None = None):
         if t == "caps":
             return _xml(_CAPS)
         if not ok(apikey):
             return _xml(_ERR)
         if t in ("movie", "tvsearch", "search") and tmdbid is None and tvdbid is None:
-            return _rss([placeholder(t)])  # RSS / connection test: Radarr/Sonarr refuse an indexer with no results
+            # RSS / connection test only (no query): Radarr/Sonarr refuse an indexer with no results.
+            # A text search (q=...) gets nothing, or B would grab the placeholder.
+            return _rss([] if q.strip() else [placeholder(t)])
         item = None
         tmdb, tvdb, sn, epn = _int(tmdbid), _int(tvdbid), _int(season), _int(ep)
         if t == "movie" and tmdb:
