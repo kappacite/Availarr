@@ -89,6 +89,8 @@ class Sonarr:
         created = s is None
         if created:
             body = self._lookup(item)
+            if not body.get("languageProfileId", 0) > 0:
+                body["languageProfileId"] = 1  # Sonarr v3 requires it; v4 ignores it
             body.update(qualityProfileId=self._profile_id(profile), rootFolderPath=self.root, monitored=True,
                         seasonFolder=True, tags=[self._tag_id()],
                         addOptions={"monitor": "none", "searchForMissingEpisodes": False})
@@ -136,8 +138,10 @@ class Sonarr:
         s = self._series(item)
         if s is None:
             return
-        targets = [e for e in self._eps(s["id"], item) if self._key(item, e) in unit_keys]
-        for fid in dict.fromkeys(e["episodeFileId"] for e in targets if e.get("episodeFileId")):
+        season = self._req("GET", "/episode", params={"seriesId": s["id"], "seasonNumber": item.season})
+        targets = [e for e in season if self._key(item, e) in unit_keys]
+        kept = {e.get("episodeFileId") for e in season if self._key(item, e) not in unit_keys}  # multi-episode files
+        for fid in dict.fromkeys(e["episodeFileId"] for e in targets if e.get("episodeFileId") and e["episodeFileId"] not in kept):
             self._req("DELETE", f"/episodefile/{fid}")
         if targets:
             self._req("PUT", "/episode/monitor", json={"episodeIds": [e["id"] for e in targets], "monitored": False})

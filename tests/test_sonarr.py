@@ -77,6 +77,7 @@ def test_ensure_adds_series_waits_and_searches():
     body = next(c[3] for c in calls if c[:2] == ("POST", "/api/v3/series"))
     assert body["qualityProfileId"] == 4 and body["rootFolderPath"] == "/tv" and body["tags"] == [1]
     assert body["addOptions"] == {"monitor": "none", "searchForMissingEpisodes": False} and body["seasonFolder"] is True
+    assert body["languageProfileId"] == 1
     assert ("POST", "/api/v3/command", {}, {"name": "RefreshSeries", "seriesId": 7}) in calls
     assert s.sleeps == [2, 2]
     assert ("PUT", "/api/v3/episode/monitor", {}, {"episodeIds": [101, 102], "monitored": True}) in calls
@@ -137,3 +138,11 @@ def test_remove_drops_series_only_when_no_files_remain():
     s, calls = make({})
     s.remove(SEASON, [], True)
     assert calls == []
+
+
+def test_remove_keeps_file_shared_with_protected_episode():
+    eps = [ep(101, 1, 51), ep(102, 2, 51)]
+    s, calls = make({("GET", "/api/v3/series"): [SERIES], ("GET", "/api/v3/episode"): eps, ("GET", "/api/v3/episodefile"): [FILE]})
+    s.remove(SEASON, ["episode:81189:2:1"], True)
+    assert not any(c[0] == "DELETE" for c in calls)
+    assert ("PUT", "/api/v3/episode/monitor", {}, {"episodeIds": [101], "monitored": False}) in calls
