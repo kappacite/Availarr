@@ -4,7 +4,7 @@ from availarr.common import Item
 from availarr.server.db import JobStore
 from availarr.server.jobs import Jobs
 from availarr.server.library import Unit
-from availarr.server.retention import tick
+from availarr.server.retention import seed_ok, seed_seconds, tick
 from tests.fakes import FakeLibrary, FakeQbit, make_cfg
 from tests.test_jobs import Clock, GOOD, M, P
 
@@ -86,7 +86,7 @@ def test_mixed_protected_removes_only_unprotected_units(env):
     qbit.seed["h"] = 3 * D
     mk(item=S, units=["episode:1:1:1", "episode:1:1:2"], protected=["episode:1:1:1"])
     assert len(tick(jobs, qbit, 7 * D)) == 1
-    assert lib.removed == [(S, ["episode:1:1:2"], True)]
+    assert lib.removed == [(S, ["episode:1:1:2"], False)]
 
 
 def test_drop_entry_false_when_not_added_or_shared(env):
@@ -106,7 +106,12 @@ def test_failure_does_not_stop_other_jobs(env):
     qbit.seed["h"] = 3 * D
     a, b = mk(), mk(item=Item("movie", 7), units=["movie:7"])
     real = lib.remove
-    lib.remove = lambda item, *r: (_ for _ in ()).throw(RuntimeError()) if item == M else real(item, *r)
+
+    def flaky(item, *rest):
+        if item == M:
+            raise RuntimeError("boom")
+        real(item, *rest)
+    lib.remove = flaky
     assert tick(jobs, qbit, 7 * D) == [b.id]
     assert jobs.store.get(a.id).deleted_at is None
 
@@ -116,3 +121,33 @@ def test_tick_refreshes_pending(env):
     j = mk(state="pending", closed_at=None)
     tick(jobs, qbit, 0)
     assert jobs.store.get(j.id).state == "ready"
+
+
+def test_refresh_error_does_not_block_other_jobs(env):
+    jobs, lib, qbit, mk = env
+    qbit.seed["h"] = 3 * D
+    bad = mk(state="pending", closed_at=None)
+    good = mk(item=Item("movie", 7), units=["movie:7"])
+    real = jobs.refresh
+
+    def refresh(job):
+        if job.id == bad.id:
+            raise RuntimeError("boom")
+        return real(job)
+    jobs.refresh = refresh
+    assert tick(jobs, qbit, 7 * D) == [good.id]
+
+
+def test_seed_seconds_and_multi_hash(env):
+    jobs, lib, qbit, mk = env
+    j = mk()
+    j.hashes = ["a", "b", "c"]
+    qbit.seed.update(a=5 * D, b=2 * D, c=None)
+    assert seed_seconds(j, qbit) == 2 * D and not seed_ok(j, qbit, 3)
+    qbit.seed.update(a=None, b=None)
+    assert seed_seconds(j, qbit) is None and seed_ok(j, qbit, 3)
+    j.hashes = []
+    assert seed_seconds(j, qbit) is None and seed_ok(j, qbit, 3)
+    j.hashes = ["a", "b"]
+    qbit.seed.update(a=None, b=2 * D)
+    assert not seed_ok(j, qbit, 3)

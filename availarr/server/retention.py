@@ -35,14 +35,18 @@ def _shares_entry(a: Job, b: Job) -> bool:
 def tick(jobs: Jobs, qbit, now: float) -> list[int]:
     for job in jobs.store.all():
         if job.state == "pending":
-            jobs.refresh(job)
+            try:
+                jobs.refresh(job)
+            except Exception:
+                log.exception("retention: refreshing job %s failed", job.id)
     all_jobs = jobs.store.all()
     done = []
     for job in all_jobs:
-        if not _eligible(job, qbit, now, jobs.cfg.keep_days, jobs.cfg.seed_days):
-            continue
         try:
-            drop = job.added_by_tool and not any(
+            if not _eligible(job, qbit, now, jobs.cfg.keep_days, jobs.cfg.seed_days):
+                continue
+            # a partly protected entry must never be dropped: Sonarr would delete the protected episodes too
+            drop = job.added_by_tool and not job.protected_units and not any(
                 o.id != job.id and o.deleted_at is None and _shares_entry(job, o) for o in all_jobs)
             keys = [u for u in job.units if u not in job.protected_units]
             jobs.lib(job.item).remove(job.item, keys, drop)
@@ -52,5 +56,5 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
             jobs.store.update(job)
             done.append(job.id)
         except Exception:
-            log.exception("retention: deleting job %s failed", job.id)
+            log.exception("retention: job %s failed", job.id)
     return done
