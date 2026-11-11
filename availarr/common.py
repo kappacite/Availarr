@@ -22,6 +22,8 @@ class Item:
     @classmethod
     def from_key(cls, s: str) -> "Item":
         kind, *nums = s.split(":")
+        if len(nums) != {"movie": 1, "season": 2, "episode": 3}.get(kind, -1):
+            raise ValueError(f"bad item key: {s}")
         return cls(kind, *map(int, nums))
 
 

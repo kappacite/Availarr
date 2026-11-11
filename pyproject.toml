@@ -13,3 +13,6 @@ dev = ["pytest>=8"]
 
 [tool.setuptools]
 packages = ["availarr", "availarr.server", "availarr.agent"]
+
+[tool.pytest.ini_options]
+filterwarnings = ["ignore::DeprecationWarning"]
