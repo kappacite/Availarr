@@ -1,0 +1,131 @@
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from availarr.agent.db import AgentJob, AgentStore
+from availarr.agent.transfer import ServerClient, step
+from availarr.server.api import create_api
+from availarr.server.db import JobStore
+from availarr.server.jobs import Jobs
+from availarr.server.library import Unit
+from availarr.server.quality import FileInfo
+from availarr.common import Item
+from tests.fakes import FakeLibrary, make_cfg
+
+DATA = bytes(range(250)) * 4
+P = "HD-1080p FR"
+ITEM = Item.from_key("movie:603")
+
+
+class Env:
+    def __init__(self, tmp_path, ready=True):
+        f = tmp_path / "src" / "Dune.mkv"
+        f.parent.mkdir()
+        f.write_bytes(DATA)
+        info = FileInfo(1080, "Bluray-1080p", ["French", "English"], str(f), 1000)
+        self.lib = FakeLibrary([Unit("movie:603", True, True, info) if ready else Unit("movie:603", True, False, None)])
+        cfg = make_cfg(bandwidth_mbps=0)
+        self.now = 42.0
+        self.jobs = Jobs(JobStore(str(tmp_path / "j.db")), self.lib, self.lib, cfg, lambda: self.now)
+        self.server = ServerClient("http://x", "change-me", TestClient(create_api(self.jobs, cfg)))
+        self.db = str(tmp_path / "a.db")
+        self.store = AgentStore(self.db)
+        self.dir = tmp_path / "out"
+        self.jid = self.server.request("movie:603", P, "t")
+
+    def add(self, state="queued"):
+        self.store.add(AgentJob("n1", self.jid, "t", "radarr", state, 1000, 0.0, 0, str(self.dir), None, False, 0.0))
+
+    def job(self):
+        return self.store.get("n1")
+
+
+@pytest.fixture
+def env(tmp_path):
+    return Env(tmp_path)
+
+
+def test_download_resumes_from_part(env):
+    env.dir.mkdir()
+    dest = env.dir / "Dune.mkv"
+    (env.dir / "Dune.mkv.part").write_bytes(DATA[:400])
+    seen = []
+    env.server.download(env.jid, 0, dest, 1000, seen.append)
+    assert dest.read_bytes() == DATA and not (env.dir / "Dune.mkv.part").exists()
+    assert env.jobs.transfer[env.jid] == (1000, 1000) and seen[-1] == 1000
+
+
+def test_download_complete_part_416(env):
+    env.dir.mkdir()
+    (env.dir / "Dune.mkv.part").write_bytes(DATA)
+    env.server.download(env.jid, 0, env.dir / "Dune.mkv", 1000, lambda n: None)
+    assert (env.dir / "Dune.mkv").read_bytes() == DATA
+
+
+def test_download_short_stream_keeps_part(env, monkeypatch):
+    env.dir.mkdir()
+    real = httpx.Response.iter_bytes
+
+    def short(self, n=None):
+        yield next(real(self, n))[:300]
+    monkeypatch.setattr(httpx.Response, "iter_bytes", short)
+    with pytest.raises(OSError):
+        env.server.download(env.jid, 0, env.dir / "Dune.mkv", 1000, lambda n: None)
+    assert (env.dir / "Dune.mkv.part").stat().st_size == 300 and not (env.dir / "Dune.mkv").exists()
+
+
+def test_lookup_none(env):
+    assert env.server.lookup("movie:603", P)["size"] == 1000
+    env.lib.units = []
+    assert env.server.lookup("movie:603", P) is None
+
+
+def test_step_pending_updates_phase(tmp_path):
+    e = Env(tmp_path, ready=False)
+    e.lib.progress = 0.5
+    e.add()
+    step(e.store, e.server)
+    assert (e.job().phase, e.job().state) == (0.5, "queued")
+
+
+def test_step_ready_transfers_and_completes(env):
+    env.add()
+    step(env.store, env.server)
+    j = env.job()
+    assert j.state == "completed" and (j.size, j.done) == (1000, 1000)
+    assert (env.dir / "Dune.mkv").read_bytes() == DATA
+    assert env.jobs.store.get(env.jid).outcome == "delivered"
+
+
+def test_step_failed_marks_failed(tmp_path):
+    e = Env(tmp_path, ready=False)
+    e.now = 10**9
+    e.add()
+    step(e.store, e.server)
+    assert e.job().state == "failed" and e.job().fail_message == e.jobs.store.get(e.jid).error
+
+
+def test_step_resumes_after_restart(env):
+    env.dir.mkdir()
+    (env.dir / "Dune.mkv.part").write_bytes(DATA[:400])
+    env.add("transferring")
+    step(AgentStore(env.db), env.server)
+    assert env.job().state == "completed" and (env.dir / "Dune.mkv").read_bytes() == DATA
+
+
+def test_step_bad_name_fails(env, monkeypatch):
+    env.add()
+    monkeypatch.setattr(env.server, "status", lambda i: {"state": "ready", "progress": 1.0, "error": None,
+                                                         "files": [{"index": 0, "name": "../x", "size": 1}]})
+    step(env.store, env.server)
+    assert env.job().state == "failed" and env.job().fail_message == "nom de fichier invalide"
+
+
+def test_step_survives_network_error(env, monkeypatch):
+    env.add()
+
+    def boom(i):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(env.server, "status", boom)
+    step(env.store, env.server)
+    assert env.job().state == "queued"
