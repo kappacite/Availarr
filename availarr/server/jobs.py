@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 
 from availarr.common import Item, release_title as make_title
@@ -12,6 +13,7 @@ class Jobs:
     def __init__(self, store: JobStore, radarr: Library, sonarr: Library, cfg: ServerConfig, clock=time.time):
         self.store, self.radarr, self.sonarr, self.cfg, self.clock = store, radarr, sonarr, cfg, clock
         self.unmapped: set[str] = set()
+        self._lock = threading.Lock()  # ponytail: process-wide lock, fine for one agent
         self.transfer: dict[int, tuple[int, int]] = {}  # job id -> (bytes served, total); filled by the API
 
     def lib(self, item: Item) -> Library:
@@ -39,9 +41,15 @@ class Jobs:
         return {"title": make_title(name, year, item, req.announce), "size": int(gb * 10**9)}
 
     def request(self, item: Item, b_profile: str, release_title: str) -> Job:
+        with self._lock:
+            return self._request(item, b_profile, release_title)
+
+    def _request(self, item: Item, b_profile: str, release_title: str) -> Job:
         if job := self.store.active_for(item):
             return job
         req = self.requirement(b_profile)
+        if req is None:
+            raise ValueError(f"unmapped profile: {b_profile}")
         lib = self.lib(item)
         units = lib.units(item)
         protected = [u.key for u in units if u.file or u.monitored]  # before ensure() touches anything
@@ -59,6 +67,10 @@ class Jobs:
             return job
         lib, now = self.lib(job.item), self.clock()
         req = self.requirement(job.b_profile)
+        if req is None:
+            job.state, job.error = "failed", f"Profil de B sans correspondance : {job.b_profile}"
+            self.store.update(job)
+            return job
         units = lib.units(job.item)
         if units and all(satisfies(u.file, req) for u in units):
             job.state, job.ready_at = "ready", now

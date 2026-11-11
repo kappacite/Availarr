@@ -24,7 +24,10 @@ class _Attr:
         self.name = "_" + name
 
     def __get__(self, obj, owner=None):
-        return lambda *a: getattr(obj, self.name)
+        def get(*a):
+            getattr(obj, "calls", {}).setdefault(self.name[1:], []).append(a)
+            return getattr(obj, self.name)
+        return get
 
     def __set__(self, obj, value):
         setattr(obj, self.name, self.conv(value))
@@ -37,7 +40,7 @@ class FakeLibrary:
         self.profile = profile
         self.units = units
         self.title, self.progress, self.hashes = title, progress, hashes
-        self.ensure_calls, self.removed = [], []
+        self.ensure_calls, self.removed, self.calls = [], [], {}
 
     def profile_name(self, item):
         return self.profile

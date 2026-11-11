@@ -115,6 +115,20 @@ def test_refresh_ready_records_hashes_and_units(mk, clock):
     lib.units, lib.hashes = [Unit("movie:603", True, True, GOOD)], ["abc"]
     job = j.refresh(job)
     assert (job.state, job.hashes, job.ready_at) == ("ready", ["abc"], 50)
+    assert lib.calls["hashes"] == [(M, job.created_at)]
+
+
+def test_request_unmapped_profile_raises(mk):
+    with pytest.raises(ValueError, match="unmapped profile: Ultra"):
+        mk(FakeLibrary([NONE])).request(M, "Ultra", "T")
+
+
+def test_refresh_unmapped_profile_fails_job(mk):
+    j = mk(FakeLibrary([NONE]))
+    job = j.request(M, P, "T")
+    j.cfg.profiles.clear()
+    job = j.refresh(job)
+    assert job.state == "failed" and job.error == "Profil de B sans correspondance : HD-1080p FR"
 
 
 def test_status_and_file_path(mk):
