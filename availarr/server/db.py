@@ -11,6 +11,7 @@ _SCHEMA = """CREATE TABLE IF NOT EXISTS jobs (
  created_at REAL, ready_at REAL, closed_at REAL, outcome TEXT, decision TEXT,
  deleted_at REAL, error TEXT)"""
 _JSON = ("units", "protected_units", "hashes")
+_OWNED = ("decision", "closed_at", "outcome", "deleted_at")  # written only through set(), never by update()
 
 
 @dataclass
@@ -81,9 +82,18 @@ class JobStore:
         return _row(rows[0]) if rows else None
 
     def update(self, job: Job) -> None:
-        v = _vals(job)
+        """Write the refresh-owned columns; decision/closed_at/outcome/deleted_at go through set()."""
+        v = {k: x for k, x in _vals(job).items() if k not in _OWNED}
         sets = ",".join(f"{k}=:{k}" for k in v if k != "id")
         self._run(f"UPDATE jobs SET {sets} WHERE id=:id", v)
+
+    def set(self, id: int, **cols) -> None:
+        """Column-targeted write, so concurrent writers (panel, API, retention) never clobber each other."""
+        names = {f.name for f in fields(Job)} - {"id", "item"}
+        if not cols or set(cols) - names:
+            raise ValueError(f"bad columns: {sorted(cols)}")
+        v = {k: json.dumps(x) if k in _JSON else x for k, x in cols.items()}
+        self._run(f"UPDATE jobs SET {','.join(f'{k}=:{k}' for k in v)} WHERE id=:id", {**v, "id": id})
 
     def all(self) -> list[Job]:
         return [_row(r) for r in self._run("SELECT * FROM jobs ORDER BY id DESC")]

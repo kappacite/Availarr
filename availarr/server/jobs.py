@@ -46,7 +46,9 @@ class Jobs:
 
     def _request(self, item: Item, b_profile: str, release_title: str) -> Job:
         if job := self.store.active_for(item):
-            return job
+            # B grabs it again: a fresh transfer, so the old close/decision must not delete it mid-way
+            self.store.set(job.id, closed_at=None, outcome=None, decision="none")
+            return self.store.get(job.id)
         req = self.requirement(b_profile)
         if req is None:
             raise ValueError(f"unmapped profile: {b_profile}")
@@ -75,7 +77,7 @@ class Jobs:
         if units and all(satisfies(u.file, req) for u in units):
             job.state, job.ready_at = "ready", now
             job.units = [u.key for u in units]
-            job.hashes = lib.hashes(job.item, job.created_at)
+            job.hashes = lib.hashes(job.item, job.created_at, job.protected_units)
         elif now - job.created_at >= self.cfg.fail_days * 86400:
             job.state, job.error = "failed", f"Introuvable chez A après {self.cfg.fail_days:g} j"
         else:
@@ -84,11 +86,13 @@ class Jobs:
         return job
 
     def _files(self, job: Job):
-        if job.state != "ready":
+        if job.state != "ready" or job.deleted_at is not None:
             return []
         return [u.file for u in self.lib(job.item).units(job.item) if u.file]
 
     def status(self, job: Job) -> dict:
+        if job.deleted_at is not None:
+            return {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
         progress = 1.0 if job.state == "ready" else self.lib(job.item).progress(job.item) if job.state == "pending" else 0.0
         files = [{"index": i, "name": os.path.basename(f.path), "size": f.size} for i, f in enumerate(self._files(job))]
         return {"state": job.state, "progress": progress, "error": job.error, "files": files}
@@ -101,4 +105,4 @@ class Jobs:
 
     def close(self, job: Job, outcome: str) -> None:
         job.outcome, job.closed_at = outcome, self.clock()
-        self.store.update(job)
+        self.store.set(job.id, outcome=job.outcome, closed_at=job.closed_at)

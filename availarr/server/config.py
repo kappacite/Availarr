@@ -47,6 +47,12 @@ def load_server_config(path: str) -> ServerConfig:
     for k in ("movie_gb", "episode_gb"):
         if k in sz:
             opt[k] = sz[k]
+    for k in ("token", "admin_password"):
+        if not need(k):
+            raise ValueError(f"empty config key: {k}")
+    for n, p in d.get("profiles", {}).items():
+        if not p.get("a_profiles"):
+            raise ValueError(f"empty a_profiles in [profiles.{n}]")
     return ServerConfig(
         token=need("token"), admin_password=need("admin_password"),
         radarr_url=need("radarr", "url"), radarr_key=need("radarr", "key"), radarr_root=need("radarr", "root_folder"),

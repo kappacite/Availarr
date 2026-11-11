@@ -106,7 +106,7 @@ def test_progress():
     s, _ = make({("GET", "/api/v3/series"): [SERIES], ("GET", "/api/v3/episode"): EPS, ("GET", "/api/v3/queue/details"): q})
     assert s.progress(SEASON) == 0.75
     s, _ = make({})
-    assert s.progress(SEASON) == 0.0 and s.hashes(SEASON, 0) == []
+    assert s.progress(SEASON) == 0.0 and s.hashes(SEASON, 0, []) == []
 
 
 def test_hashes_filtered_by_episode():
@@ -116,7 +116,7 @@ def test_hashes_filtered_by_episode():
          {"eventType": imp, "episodeId": 102, "date": "2025-01-02T00:00:00Z", "downloadId": "OLD"},
          {"eventType": "grabbed", "episodeId": 102, "date": "2026-01-02T00:00:00Z", "downloadId": "G"}]
     s, calls = make({("GET", "/api/v3/series"): [SERIES], ("GET", "/api/v3/episode"): EPS, ("GET", "/api/v3/history/series"): h})
-    assert s.hashes(SEASON, 1767225600) == ["aaa"]
+    assert s.hashes(SEASON, 1767225600, []) == ["aaa"]
     assert ("GET", "/api/v3/history/series", {"seriesId": "7", "seasonNumber": "2"}, None) in calls
 
 
@@ -146,3 +146,22 @@ def test_remove_keeps_file_shared_with_protected_episode():
     s.remove(SEASON, ["episode:81189:2:1"], True)
     assert not any(c[0] == "DELETE" for c in calls)
     assert ("PUT", "/api/v3/episode/monitor", {}, {"episodeIds": [101], "monitored": False}) in calls
+
+
+
+def test_hashes_exclude_torrent_touching_protected_episode():
+    imp = "downloadFolderImported"
+    h = [{"eventType": imp, "episodeId": 101, "date": "2026-01-02T00:00:00Z", "downloadId": "PACK"},
+         {"eventType": imp, "episodeId": 102, "date": "2026-01-02T00:00:00Z", "downloadId": "PACK"},
+         {"eventType": imp, "episodeId": 102, "date": "2026-01-02T00:00:00Z", "downloadId": "MINE"}]
+    s, _ = make({("GET", "/api/v3/series"): [SERIES], ("GET", "/api/v3/episode"): EPS, ("GET", "/api/v3/history/series"): h})
+    assert s.hashes(SEASON, 0, []) == ["pack", "mine"]
+    assert s.hashes(SEASON, 0, ["episode:81189:2:1"]) == ["mine"]
+
+
+def test_ensure_null_language_profile():
+    s, calls = make({("GET", "/api/v3/series/lookup"): [{"title": "BB", "languageProfileId": None}],
+                     ("GET", "/api/v3/qualityprofile"): PROFILES, ("GET", "/api/v3/tag"): [{"id": 1, "label": "availarr"}],
+                     ("POST", "/api/v3/series"): {"id": 7}, ("GET", "/api/v3/episode"): EPS})
+    s.ensure(SEASON, "Any", False)
+    assert next(c[3] for c in calls if c[:2] == ("POST", "/api/v3/series"))["languageProfileId"] == 1

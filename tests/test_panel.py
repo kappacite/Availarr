@@ -30,7 +30,8 @@ def env(tmp_path):
         for k, v in kw.items():
             setattr(j, k, v)
         jobs.store.update(j)
-        return j
+        jobs.store.set(j.id, **{k: getattr(j, k) for k in ("decision", "closed_at", "outcome", "deleted_at")})
+        return jobs.store.get(j.id)
     return jobs, qbit, mk, TestClient(create_panel(jobs, qbit, jobs.cfg, lambda: 0), follow_redirects=False)
 
 
@@ -91,3 +92,14 @@ def test_already_there_and_qbit_error(env):
     qbit.seeding_seconds = lambda h: 1 / 0
     mk("Boom")
     assert c.get("/", auth=AUTH).status_code == 200
+
+
+def test_pending_row_renders_when_library_down(env):
+    jobs, qbit, mk, c = env
+    mk(state="pending")
+
+    def down(*a):
+        raise RuntimeError("radarr down")
+    jobs.status = down
+    r = c.get("/", auth=AUTH)
+    assert r.status_code == 200 and "Téléchargement …" in r.text

@@ -25,3 +25,15 @@ def test_missing_token(tmp_path):
     text = EX.read_text().replace('token = "change-me"\n', "", 1)
     with pytest.raises(ValueError, match="token"):
         load_server_config(write(tmp_path, text))
+
+
+@pytest.mark.parametrize("old,new,msg", [
+    ('token = "change-me"', 'token = ""', "token"),
+    ('admin_password = "change-me"', 'admin_password = ""', "admin_password"),
+    ('a_profiles = ["1080p MULTi"]', "a_profiles = []", "a_profiles"),
+])
+def test_rejects_empty_values(tmp_path, old, new, msg):
+    text = EX.read_text()
+    assert old in text
+    with pytest.raises(ValueError, match=msg):
+        load_server_config(write(tmp_path, text.replace(old, new, 1)))

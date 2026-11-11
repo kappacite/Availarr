@@ -23,6 +23,18 @@ def test_deleted_not_active_and_all_order(tmp_path):
     s = JobStore(str(tmp_path / "a.db"))
     a = s.create(M, "HD", "A", ["movie:603"], [], True, 1.0)
     b = s.create(Item("movie", 1), "HD", "B", ["movie:1"], [], True, 2.0)
-    a.deleted_at = 5.0; s.update(a)
+    s.set(a.id, deleted_at=5.0)
     assert s.active_for(M) is None
     assert [j.id for j in s.all()] == [b.id, a.id]
+
+
+def test_update_never_rewrites_owned_columns(tmp_path):
+    s = JobStore(str(tmp_path / "a.db"))
+    stale = s.create(M, "HD", "T", ["movie:603"], [], True, 1.0)
+    s.set(stale.id, decision="keep", closed_at=9.0, outcome="delivered", deleted_at=None)
+    stale.state = "ready"
+    s.update(stale)  # a refresh holding a snapshot taken before the panel/API wrote
+    g = s.get(stale.id)
+    assert (g.state, g.decision, g.closed_at, g.outcome) == ("ready", "keep", 9.0, "delivered")
+    s.set(stale.id, hashes=["x"])
+    assert s.get(stale.id).hashes == ["x"]

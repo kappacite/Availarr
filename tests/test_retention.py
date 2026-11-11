@@ -23,7 +23,8 @@ def env(tmp_path):
         for k, v in kw.items():
             setattr(j, k, v)
         jobs.store.update(j)
-        return j
+        jobs.store.set(j.id, **{k: getattr(j, k) for k in ("decision", "closed_at", "outcome", "deleted_at")})
+        return jobs.store.get(j.id)
     return jobs, lib, qbit, mk
 
 
@@ -151,3 +152,16 @@ def test_seed_seconds_and_multi_hash(env):
     j.hashes = ["a", "b"]
     qbit.seed.update(a=None, b=2 * D)
     assert not seed_ok(j, qbit, 3)
+
+
+def test_keep_set_during_eligibility_is_honoured(env):
+    jobs, lib, qbit, mk = env
+    j = mk()
+
+    class FlipQbit(FakeQbit):
+        def seeding_seconds(self, h):  # the panel clicks "Garder" while the tick is judging
+            jobs.store.set(j.id, decision="keep")
+            return 9 * D
+    q = FlipQbit({})
+    assert tick(jobs, q, 100 * D) == [] and lib.removed == [] and q.deleted == []
+    assert jobs.store.get(j.id).deleted_at is None

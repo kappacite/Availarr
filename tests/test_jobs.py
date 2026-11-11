@@ -115,7 +115,7 @@ def test_refresh_ready_records_hashes_and_units(mk, clock):
     lib.units, lib.hashes = [Unit("movie:603", True, True, GOOD)], ["abc"]
     job = j.refresh(job)
     assert (job.state, job.hashes, job.ready_at) == ("ready", ["abc"], 50)
-    assert lib.calls["hashes"] == [(M, job.created_at)]
+    assert lib.calls["hashes"] == [(M, job.created_at, job.protected_units)]
 
 
 def test_request_unmapped_profile_raises(mk):
@@ -149,3 +149,24 @@ def test_status_pending_progress_and_close(mk, clock):
     j.close(job, "cancelled")
     got = j.store.get(job.id)
     assert (got.outcome, got.closed_at) == ("cancelled", 9)
+
+
+def test_reuse_resets_close_and_decision(mk, clock):
+    j = mk(FakeLibrary([NONE]))
+    a = j.request(M, P, "T")
+    clock.t = 9
+    j.close(a, "cancelled")
+    j.store.set(a.id, decision="delete")
+    b = j.request(M, P, "T")
+    got = j.store.get(a.id)
+    assert b.id == a.id and (got.closed_at, got.outcome, got.decision) == (None, None, "none")
+
+
+def test_deleted_job_reports_failed_and_no_files(mk):
+    j = mk(FakeLibrary([Unit("movie:603", True, True, GOOD)]))
+    job = j.request(M, P, "T")
+    j.store.set(job.id, deleted_at=5.0)
+    job = j.store.get(job.id)
+    assert j.status(job) == {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
+    with pytest.raises(IndexError):
+        j.file_path(job, 0)

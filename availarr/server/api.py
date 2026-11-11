@@ -87,8 +87,11 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
 
     @app.get("/v1/requests/{id}/files/{index}")
     def file(id: int, index: int, request: Request):
+        job = jobs.refresh(job_or_404(id))
+        if job.deleted_at is not None:
+            raise HTTPException(410, "deleted")
         try:
-            path, _ = jobs.file_path(jobs.refresh(job_or_404(id)), index)
+            path, _ = jobs.file_path(job, index)
             size = os.stat(path).st_size  # the disk is the truth, not the recorded size
         except (IndexError, OSError):
             raise HTTPException(404, "unknown file")

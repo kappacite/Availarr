@@ -90,7 +90,8 @@ def test_hashes_filters_event_and_date():
          {"eventType": "downloadFolderImported", "date": "2026-01-02T00:00:00Z", "downloadId": "ABC"},
          {"eventType": "downloadFolderImported", "date": "2026-01-03T00:00:00Z", "downloadId": "ABC"}]
     r, _ = make({("GET", "/api/v3/movie"): [MOVIE], ("GET", "/api/v3/history/movie"): h})
-    assert r.hashes(ITEM, 1767225600) == ["abc"]  # 2026-01-01 UTC
+    assert r.hashes(ITEM, 1767225600, []) == ["abc"]  # 2026-01-01 UTC
+    assert r.hashes(ITEM, 1767225600, ["movie:603"]) == []  # protected: A's own torrent
 
 
 def test_remove_drop_entry_and_keep_entry():

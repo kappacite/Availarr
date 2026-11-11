@@ -59,7 +59,10 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         if job.state == "failed":
             return f"Échec : {job.error}"
         if job.state == "pending":
-            return f"Téléchargement {round(jobs.status(job)['progress'] * 100)}%"
+            try:
+                return f"Téléchargement {round(jobs.status(job)['progress'] * 100)}%"
+            except Exception:  # A's Radarr/Sonarr down: the page must still render
+                return "Téléchargement …"
         if job.state == "ready":
             t = jobs.transfer.get(job.id)
             return f"Transfert {round(100 * t[0] / t[1]) if t[1] else 0}%" if t else "Prêt"
@@ -124,10 +127,9 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         if action == "retry":
             if job.state != "failed":
                 raise HTTPException(409)
-            job.state = "retried"
+            jobs.store.set(id, state="retried")
         else:
-            job.decision = ACTIONS[action]
-        jobs.store.update(job)
+            jobs.store.set(id, decision=ACTIONS[action])
         return RedirectResponse("/", 303)
 
     return app

@@ -92,9 +92,9 @@ class Radarr:
         total = sum(e["size"] for e in q)
         return sum(e["size"] - e["sizeleft"] for e in q) / total if total else 0.0
 
-    def hashes(self, item: Item, since: float) -> list[str]:
+    def hashes(self, item: Item, since: float, exclude_keys: list[str]) -> list[str]:
         m = self._movie(item)
-        if m is None:
+        if m is None or f"movie:{item.ext_id}" in exclude_keys:  # A's own torrent of a protected movie
             return []
         h = self._req("GET", "/history/movie", params={"movieId": m["id"]})
         out = (e["downloadId"].lower() for e in h

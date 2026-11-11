@@ -89,7 +89,7 @@ class Sonarr:
         created = s is None
         if created:
             body = self._lookup(item)
-            if not body.get("languageProfileId", 0) > 0:
+            if not (body.get("languageProfileId") or 0) > 0:
                 body["languageProfileId"] = 1  # Sonarr v3 requires it; v4 ignores it
             body.update(qualityProfileId=self._profile_id(profile), rootFolderPath=self.root, monitored=True,
                         seasonFolder=True, tags=[self._tag_id()],
@@ -121,15 +121,19 @@ class Sonarr:
         total = sum(e["size"] for e in q)
         return sum(e["size"] - e["sizeleft"] for e in q) / total if total else 0.0
 
-    def hashes(self, item: Item, since: float) -> list[str]:
+    def hashes(self, item: Item, since: float, exclude_keys: list[str]) -> list[str]:
         s = self._series(item)
         if s is None:
             return []
-        ids = {e["id"] for e in self._eps(s["id"], item)}
+        season = self._req("GET", "/episode", params={"seriesId": s["id"], "seasonNumber": item.season})
+        ids = {e["id"] for e in season if item.kind != "episode" or e["episodeNumber"] == item.episode}
+        excluded = {e["id"] for e in season if self._key(item, e) in exclude_keys}
         h = self._req("GET", "/history/series", params={"seriesId": s["id"], "seasonNumber": item.season})
-        out = (e["downloadId"].lower() for e in h
-               if e["eventType"] == "downloadFolderImported" and e.get("downloadId")
-               and e.get("episodeId") in ids and _epoch(e["date"]) >= since)
+        imports = [e for e in h if e["eventType"] == "downloadFolderImported" and e.get("downloadId")]
+        # a torrent that also imported a protected episode is A's own: never attribute it to B
+        owned = {e["downloadId"].lower() for e in imports if e.get("episodeId") in excluded}
+        out = (e["downloadId"].lower() for e in imports
+               if e.get("episodeId") in ids and _epoch(e["date"]) >= since and e["downloadId"].lower() not in owned)
         return list(dict.fromkeys(out))
 
     def remove(self, item: Item, unit_keys: list[str], drop_entry: bool) -> None:
