@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 import time
@@ -7,6 +8,8 @@ from availarr.server.config import ServerConfig
 from availarr.server.db import Job, JobStore
 from availarr.server.library import Library
 from availarr.server.quality import Requirement, file_tags, satisfies
+
+log = logging.getLogger(__name__)
 
 
 class Jobs:
@@ -27,11 +30,16 @@ class Jobs:
 
     def lookup(self, item: Item, b_profile: str) -> dict | None:
         req = self.requirement(b_profile)
-        if req is None or self.store.failed_for(item):
+        if req is None:
+            log.warning("lookup %s: B profile %r has no [profiles] entry and no 'default'", item.key(), b_profile)
+            return None
+        if self.store.failed_for(item):
+            log.info("lookup %s: blocked after a failure (panel: Réessayer)", item.key())
             return None
         lib = self.lib(item)
         units = lib.units(item)
         if not units:
+            log.info("lookup %s: nothing to offer (no matching units)", item.key())
             return None
         name, year = lib.title(item)
         if all(satisfies(u.file, req) for u in units):
