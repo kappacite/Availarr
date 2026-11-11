@@ -6,6 +6,9 @@ import pytest
 from availarr.server.qbit import QBit
 
 
+H = "a" * 40
+
+
 def make(info, fail_first=False):
     calls = []
     state = {"first": fail_first}
@@ -25,26 +28,45 @@ def make(info, fail_first=False):
 
 
 def test_seeding_and_absent():
-    q, calls = make([{"seeding_time": 3600}])
-    assert q.seeding_seconds("h") == 3600
+    q, calls = make([{"hash": H, "seeding_time": 3600}])
+    assert q.seeding_seconds(H) == 3600
     assert calls[0] == ("POST", "/api/v2/auth/login", {"username": ["u"], "password": ["p"]})
-    assert make([])[0].seeding_seconds("h") is None
+    assert make([])[0].seeding_seconds(H) is None
 
 
 def test_delete_form():
     q, calls = make([])
-    q.delete("h")
-    assert calls[-1] == ("POST", "/api/v2/torrents/delete", {"hashes": ["h"], "deleteFiles": ["true"]})
+    q.delete(H)
+    assert calls[-1] == ("POST", "/api/v2/torrents/delete", {"hashes": [H], "deleteFiles": ["true"]})
 
 
 def test_relogin_on_403_once():
-    q, calls = make([{"seeding_time": 5}], fail_first=True)
-    assert q.seeding_seconds("h") == 5
+    q, calls = make([{"hash": H, "seeding_time": 5}], fail_first=True)
+    assert q.seeding_seconds(H) == 5
     assert [c[1] for c in calls].count("/api/v2/auth/login") == 2
 
 
 def test_errors_raise():
     with pytest.raises(httpx.HTTPStatusError):
-        make(httpx.Response(500))[0].seeding_seconds("h")
+        make(httpx.Response(500))[0].seeding_seconds(H)
     with pytest.raises(httpx.HTTPStatusError):  # persistent 403 after the one retry
-        make(httpx.Response(403))[0].seeding_seconds("h")
+        make(httpx.Response(403))[0].seeding_seconds(H)
+
+
+def test_bad_hash_rejected_without_request():
+    q, calls = make([])
+    for bad in ("all", "", "  ", "abc"):
+        with pytest.raises(ValueError):
+            q.delete(bad)
+        with pytest.raises(ValueError):
+            q.seeding_seconds(bad)
+    assert calls == []
+
+
+def test_hash_lowercased_and_mismatch_is_absent():
+    q, calls = make([{"hash": "b" * 40, "seeding_time": 9}])
+    assert q.seeding_seconds(H.upper()) is None
+    assert calls[-1][2] == {}
+    q, calls = make([])
+    q.delete(H.upper())
+    assert calls[-1][2]["hashes"] == [H]

@@ -72,7 +72,8 @@ def test_ensure_adds_missing():
 def test_ensure_existing_changes_profile_and_searches():
     r, calls = make({("GET", "/api/v3/movie"): [MOVIE], ("GET", "/api/v3/qualityprofile"): PROFILES})
     assert r.ensure(ITEM, "HD-1080p FR", True) is False
-    assert next(c[3] for c in calls if c[0] == "PUT")["qualityProfileId"] == 4
+    put = next(c[3] for c in calls if c[0] == "PUT")
+    assert put["qualityProfileId"] == 4 and put["title"] == "Dune" and put["id"] == 1
     assert ("POST", "/api/v3/command", {}, {"name": "MoviesSearch", "movieIds": [1]}) in calls
 
 
@@ -99,7 +100,19 @@ def test_remove_drop_entry_and_keep_entry():
     r, calls = make({("GET", "/api/v3/movie"): [MOVIE]})
     r.remove(ITEM, ["movie:603"], False)
     assert ("DELETE", "/api/v3/moviefile/10", {}, None) in calls
-    assert next(c[3] for c in calls if c[0] == "PUT")["monitored"] is False
+    put = next(c[3] for c in calls if c[0] == "PUT")
+    assert put["monitored"] is False and put["title"] == "Dune" and put["id"] == 1
+    assert "movieFile" not in put and put["hasFile"] is False
+    assert not any(c[0] == "DELETE" and c[1] == "/api/v3/movie/1" for c in calls)
     r, calls = make({})
     r.remove(ITEM, [], True)
     assert calls == []
+
+
+def test_unknown_profile_and_empty_lookup_raise():
+    r, _ = make({("GET", "/api/v3/qualityprofile"): PROFILES})
+    with pytest.raises(ValueError, match="unknown quality profile"):
+        r._profile_id("nope")
+    r, _ = make({})
+    with pytest.raises(ValueError):
+        r.title(ITEM)

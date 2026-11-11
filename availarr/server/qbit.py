@@ -1,4 +1,13 @@
+import re
+
 import httpx
+
+
+def _norm(h: str) -> str:
+    h = h.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", h):  # "" / "all" would hit every torrent
+        raise ValueError(f"bad torrent hash: {h!r}")
+    return h
 
 
 class QBit:
@@ -25,8 +34,10 @@ class QBit:
         return r
 
     def seeding_seconds(self, h: str) -> int | None:
+        h = _norm(h)
         t = self._req("GET", "/torrents/info", params={"hashes": h}).json()
-        return t[0]["seeding_time"] if t else None
+        return next((x["seeding_time"] for x in t if x.get("hash", "").lower() == h), None)
 
     def delete(self, h: str) -> None:
+        h = _norm(h)
         self._req("POST", "/torrents/delete", data={"hashes": h, "deleteFiles": "true"})

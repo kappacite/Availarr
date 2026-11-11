@@ -29,7 +29,11 @@ class Radarr:
 
     def _lookup(self, item: Item) -> dict:
         found = self._req("GET", "/movie/lookup/tmdb", params={"tmdbId": item.ext_id})
-        return found[0] if isinstance(found, list) else found
+        if isinstance(found, list):
+            if not found:
+                raise ValueError(f"tmdb {item.ext_id} not found")
+            return found[0]
+        return found
 
     def units(self, item: Item) -> list[Unit]:
         key = f"movie:{item.ext_id}"
@@ -54,7 +58,10 @@ class Radarr:
         return next((p["name"] for p in self._req("GET", "/qualityprofile") if p["id"] == m["qualityProfileId"]), None)
 
     def _profile_id(self, name: str) -> int:
-        return next(p["id"] for p in self._req("GET", "/qualityprofile") if p["name"] == name)
+        for p in self._req("GET", "/qualityprofile"):
+            if p["name"] == name:
+                return p["id"]
+        raise ValueError(f"unknown quality profile {name!r}")
 
     def _tag_id(self) -> int:
         for t in self._req("GET", "/tag"):
@@ -106,4 +113,6 @@ class Radarr:
         if m.get("movieFile"):
             self._req("DELETE", f"/moviefile/{m['movieFile']['id']}")
         m["monitored"] = False
+        m.pop("movieFile", None)
+        m["hasFile"] = False
         self._req("PUT", f"/movie/{m['id']}", json=m)
