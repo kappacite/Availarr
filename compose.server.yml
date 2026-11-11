@@ -8,6 +8,6 @@ services:
       - "8788:8788"   # panel (réseau local / Tailscale de A uniquement)
     volumes:
       - ./config:/config:ro
-      - ./data:/data
+      - ./data:/data   # pr�parer : mkdir -p data && sudo chown 1000:1000 data
       # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
       - /media:/media:ro

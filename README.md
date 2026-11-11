@@ -17,9 +17,11 @@ Availarr permet Ã  B d'utiliser la mÃ©diathÃ¨que de A comme source de tÃ©lÃ©char
 
 1. Copier `examples/server.toml` vers `./config/server.toml` et le remplir (clÃ©s Radarr/Sonarr, qBittorrent, `token`, `admin_password`, table `[profiles]`).
 2. Dans `compose.server.yml`, monter le dossier des mÃ©dias de A **au mÃªme chemin** que dans le Radarr/Sonarr de A (le server lit les fichiers Ã  ce chemin).
-3. `docker compose -f compose.server.yml up -d --build`
+3. Préparer les dossiers (le conteneur tourne en uid 1000) : `mkdir -p config data && sudo chown 1000:1000 data`.
+4. Définir `TAILSCALE_IP` (IP `tailscale0` de A) : l'API (HTTP + token) n'est publiée que sur cette IP (par défaut `127.0.0.1`). Lier à l'IP tailscale0 ou filtrer le port 8787 au pare-feu, sauf si un reverse proxy HTTPS le précède. Le panel est lié à `127.0.0.1:8788` ; pour le LAN, voir le commentaire de `compose.server.yml`.
+5. `docker compose -f compose.server.yml up -d --build`
 
-Le fichier de config est lu depuis `/config/server.toml` (variable `AVAILARR_CONFIG` pour changer). Ports : **8787** API (pour l'agent), **8788** panel.
+Le fichier de config est lu depuis `/config/server.toml` (variable `AVAILARR_CONFIG` pour changer). Ports : **8787** API (pour l'agent), **8788** panel (local).
 
 ### CÃ´tÃ© B (agent)
 
@@ -57,6 +59,8 @@ Le **panel (8788) ne doit jamais Ãªtre exposÃ© Ã  B** : il est protÃ©gÃ© par `ad
 | URL Base | `sabnzbd` |
 | API Key | la valeur `api_key` de `agent.toml` |
 | CatÃ©gorie | `radarr` ou `sonarr` |
+
+Le nom `availarr-agent` ne se résout que si Radarr/Sonarr de B partagent le réseau Docker de l'agent ; sinon utiliser l'IP de l'hôte de B.
 
 Si le chemin de `complete_dir` vu par l'agent diffÃ¨re de celui vu par Radarr/Sonarr, ajouter un **Remote Path Mapping** (Settings > Download Clients).
 
