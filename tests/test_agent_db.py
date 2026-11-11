@@ -37,3 +37,19 @@ def test_config(tmp_path):
     p.write_text('token="t"\n')
     with pytest.raises(ValueError):
         load_agent_config(str(p))
+
+
+def test_migrates_reported_column(tmp_path):
+    import sqlite3
+    db = str(tmp_path / "old.db")
+    with sqlite3.connect(db) as c:
+        c.execute("CREATE TABLE agent_jobs (nzo_id TEXT PRIMARY KEY, server_job_id INTEGER, name TEXT, cat TEXT, "
+                  "state TEXT, size INTEGER, phase REAL, done INTEGER, storage TEXT, fail_message TEXT, "
+                  "hidden INTEGER, created_at REAL)")
+        c.execute("INSERT INTO agent_jobs VALUES ('o',1,'x','radarr','completed',1,1,1,'',NULL,0,1.0)")
+    c.close()
+    s = AgentStore(db)
+    assert s.get("o").reported is False
+    s.set_reported("o")
+    assert s.get("o").reported is True
+    AgentStore(db)  # idempotent

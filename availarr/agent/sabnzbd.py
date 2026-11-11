@@ -29,6 +29,8 @@ def router(cfg, store, server) -> APIRouter:
 
     def add(payload: dict, cat: str) -> dict:
         try:
+            if "placeholder" in payload:
+                raise ValueError("placeholder release")
             item, prof, title, size = payload["item"], payload["b_profile"], payload["title"], payload["size"]
             if not (isinstance(item, str) and isinstance(prof, str) and isinstance(title, str)
                     and isinstance(size, int) and not isinstance(size, bool)):
@@ -60,6 +62,9 @@ def router(cfg, store, server) -> APIRouter:
             except OSError:
                 pass
 
+    def in_cat(p: dict, j) -> bool:
+        return p.get("cat") in (None, "", "*") or p["cat"] == j.cat
+
     def ids(p: dict):
         return [i for i in p.get("value", "").split(",") if i]
 
@@ -74,6 +79,7 @@ def router(cfg, store, server) -> APIRouter:
                 store.update(j)
                 try:
                     server.close(j.server_job_id, "cancelled")
+                    store.set_reported(nzo)
                 except Exception as e:  # noqa: BLE001 - cancel must succeed locally
                     log.warning("server.close failed for %s: %s", nzo, e)
                 clean_parts(j.storage)
@@ -81,6 +87,8 @@ def router(cfg, store, server) -> APIRouter:
             return {"status": True, "nzo_ids": done}
         slots = []
         for j in store.active():
+            if not in_cat(p, j):
+                continue
             pct = j.percentage
             slots.append({
                 "nzo_id": j.nzo_id, "filename": j.name, "cat": j.cat,
@@ -104,7 +112,7 @@ def router(cfg, store, server) -> APIRouter:
             "nzo_id": j.nzo_id, "name": j.name, "nzb_name": j.name, "category": j.cat,
             "status": "Completed" if j.state == "completed" else "Failed", "storage": j.storage,
             "bytes": j.size, "fail_message": j.fail_message or "", "download_time": 0,
-        } for j in store.all() if j.state in ("completed", "failed") and not j.hidden]
+        } for j in store.all() if j.state in ("completed", "failed") and not j.hidden and in_cat(p, j)]
         return {"history": {"slots": slots}}
 
     def handle(p: dict, upload: bytes | None) -> dict:

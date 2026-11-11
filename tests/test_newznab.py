@@ -77,11 +77,17 @@ def test_lookup_http_error_gives_empty_rss():
     assert r.status_code == 200 and items(r) == []
 
 
-def test_rss_without_id_is_empty():
+def test_rss_without_id_returns_one_placeholder():
     s = FakeServer(REL)
     c = client(s)
-    assert items(c.get("/newznab/api", params={"t": "movie", "apikey": "K"})) == []
-    assert items(c.get("/newznab/api", params={"t": "search", "q": "x", "apikey": "K"})) == []
+    for t in ("movie", "tvsearch", "search"):
+        (it,) = items(c.get("/newznab/api", params={"t": t, "q": "x", "apikey": "K"}))
+        assert it.find("title").text == "Availarr.Placeholder-Availarr"
+        assert it.find("enclosure").get("length") == "1"
+        p = it.find("link").text.split("&p=")[1]
+        assert json.loads(base64.urlsafe_b64decode(p)) == {"placeholder": True}
+        nzb = c.get("/newznab/nzb", params={"apikey": "K", "p": p})
+        assert nzb.status_code == 200 and parse_nzb(nzb.content) == {"placeholder": True}
     assert s.calls == []
 
 

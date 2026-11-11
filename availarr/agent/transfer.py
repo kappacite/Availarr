@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 
 class ServerClient:
     def __init__(self, base_url: str, token: str, client: httpx.Client | None = None):
-        self.client = client or httpx.Client(base_url=base_url, timeout=httpx.Timeout(None, connect=30))
+        self.client = client or httpx.Client(base_url=base_url, timeout=httpx.Timeout(300, connect=30))
         self.headers = {"Authorization": f"Bearer {token}"}
 
     def _call(self, method: str, path: str, **kw) -> httpx.Response:
@@ -82,6 +82,13 @@ def _safe(name) -> bool:
 
 
 def step(store: AgentStore, server: ServerClient) -> None:
+    for j in store.all():  # a failed close would never start A's retention clock: retry it
+        if j.state in ("completed", "cancelled") and not j.reported:
+            try:
+                server.close(j.server_job_id, "delivered" if j.state == "completed" else "cancelled")
+                store.set_reported(j.nzo_id)
+            except httpx.HTTPError as e:
+                log.warning("job %s: close: %s", j.nzo_id, e)
     for j in store.active():
         try:
             job = store.get(j.nzo_id)
@@ -95,8 +102,8 @@ def step(store: AgentStore, server: ServerClient) -> None:
             elif st["state"] == "ready":
                 _transfer(store, server, job, st["files"])
                 continue
-            else:
-                continue
+            else:  # "retried" or anything unknown: A dropped this job, B must re-grab
+                job.state, job.fail_message = "failed", "Relancé chez A"
             _save(store, job)
         except Cancelled:
             pass
@@ -121,11 +128,8 @@ def _transfer(store, server, job, files) -> None:
     base = 0
     for f in files:
         def progress(n, base=base):
-            cur = store.get(job.nzo_id)
-            if cur.state != "transferring":
+            if not store.set_done(job.nzo_id, base + n):  # only done is persisted from here
                 raise Cancelled
-            cur.done = base + n  # only done is persisted from here
-            store.update(cur)
         if store.get(job.nzo_id).state != "transferring":
             raise Cancelled
         server.download(job.server_job_id, f["index"], Path(job.storage) / f["name"], f["size"], progress)
@@ -133,3 +137,4 @@ def _transfer(store, server, job, files) -> None:
     job.done, job.state = base, "completed"
     _save(store, job)
     server.close(job.server_job_id, "delivered")
+    store.set_reported(job.nzo_id)

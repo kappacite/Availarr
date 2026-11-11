@@ -7,8 +7,8 @@ Availarr permet à B d'utiliser la médiathèque de A comme source de téléchar
 - Le transfert des fichiers est repris automatiquement après une coupure.
 
 ```
- B : Radarr/Sonarr --Newznab/SABnzbd--> agent (8789) ==HTTPS/Tailscale==> server (8787) --> Radarr/Sonarr/qBittorrent de A
-                                                                          panel (8788, réseau de A uniquement)
+ B : Radarr/Sonarr --Newznab/SABnzbd--> agent (8789) ==HTTP via Tailscale, ou HTTPS via reverse proxy==> server (8787) --> Radarr/Sonarr/qBittorrent de A
+                                                                                                         panel (8788, réseau de A uniquement)
 ```
 
 ## Installation

@@ -139,3 +139,39 @@ def test_server_errors(tmp_path):
     srv.close = boom
     c.get("/sabnzbd/api", params={"mode": "queue", "name": "delete", "value": nzo, "apikey": "key"})
     assert store.get(nzo).state == "cancelled"
+
+
+def test_placeholder_rejected(tmp_path):
+    c, _, store, srv = setup(tmp_path)
+    assert _add(c, {"placeholder": True})["status"] is False
+    p = base64.urlsafe_b64encode(json.dumps({"placeholder": True}).encode()).decode()
+    r = c.get("/sabnzbd/api", params={"mode": "addurl", "apikey": "key", "name": f"http://a/newznab/nzb?p={p}"}).json()
+    assert r["status"] is False and store.all() == [] and srv.calls == []
+
+
+def test_queue_and_history_filter_by_cat(tmp_path):
+    c, _, store, _ = setup(tmp_path)
+    store.add(job("r", "queued"))
+    store.add(job("s", "queued", cat="sonarr"))
+    store.add(job("rh", "completed"))
+    store.add(job("sh", "completed", cat="sonarr"))
+
+    def got(mode, **kw):
+        out = c.get("/sabnzbd/api", params={"mode": mode, "apikey": "key", **kw}).json()[mode]["slots"]
+        return sorted(s["nzo_id"] for s in out)
+    assert got("queue", cat="sonarr") == ["s"] and got("history", cat="radarr") == ["rh"]
+    assert got("queue") == got("queue", cat="*") == ["r", "s"] and got("history", cat="") == ["rh", "sh"]
+
+
+def test_cancel_reported_only_when_close_succeeds(tmp_path):
+    c, _, store, srv = setup(tmp_path)
+    store.add(job("a", "queued"))
+    store.add(job("b", "queued"))
+    c.get("/sabnzbd/api", params={"mode": "queue", "name": "delete", "value": "a", "apikey": "key"})
+    assert store.get("a").reported
+
+    def boom(*a):
+        raise RuntimeError("down")
+    srv.close = boom
+    c.get("/sabnzbd/api", params={"mode": "queue", "name": "delete", "value": "b", "apikey": "key"})
+    assert store.get("b").state == "cancelled" and not store.get("b").reported

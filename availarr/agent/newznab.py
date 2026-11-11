@@ -14,6 +14,7 @@ from availarr.common import Item, build_nzb
 
 log = logging.getLogger(__name__)
 ATTR_NS = "http://www.newznab.com/DTD/2010/feeds/attributes/"
+PLACEHOLDER = "Availarr.Placeholder-Availarr"
 _ERR = '<error code="100" description="Incorrect user credentials"/>'
 _CAPS = (
     '<?xml version="1.0" encoding="UTF-8"?><caps><server title="Availarr"/>'
@@ -67,10 +68,17 @@ def router(cfg, server, b) -> APIRouter:
         if not found:
             return []
         payload = {"item": item.key(), "b_profile": prof, "title": found["title"], "size": found["size"]}
-        p = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
-        link = f"{cfg.public_url.rstrip('/')}/newznab/nzb?apikey={quote(cfg.api_key, safe='')}&p={p}"
-        return [{"title": found["title"], "guid": item.key() + " " + found["title"], "link": link,
+        return [{"title": found["title"], "guid": item.key() + " " + found["title"], "link": link(payload),
                  "size": found["size"], "cat": 2000 if item.kind == "movie" else 5000}]
+
+    def link(payload: dict) -> str:
+        p = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+        return f"{cfg.public_url.rstrip('/')}/newznab/nzb?apikey={quote(cfg.api_key, safe='')}&p={p}"
+
+    def placeholder(t: str) -> dict:
+        # never grabbable: the SABnzbd side rejects it
+        return {"title": PLACEHOLDER, "guid": "availarr-placeholder", "link": link({"placeholder": True}),
+                "size": 1, "cat": 5000 if t == "tvsearch" else 2000}
 
     @r.get("/newznab/api")
     def api(t: str = "", apikey: str = "", tmdbid: str | None = None, tvdbid: str | None = None,
@@ -79,6 +87,8 @@ def router(cfg, server, b) -> APIRouter:
             return _xml(_CAPS)
         if not ok(apikey):
             return _xml(_ERR)
+        if t in ("movie", "tvsearch", "search") and tmdbid is None and tvdbid is None:
+            return _rss([placeholder(t)])  # RSS / connection test: Radarr/Sonarr refuse an indexer with no results
         item = None
         tmdb, tvdb, sn, epn = _int(tmdbid), _int(tvdbid), _int(season), _int(ep)
         if t == "movie" and tmdb:
@@ -93,6 +103,8 @@ def router(cfg, server, b) -> APIRouter:
             return _xml(_ERR)
         try:
             payload = json.loads(base64.urlsafe_b64decode(p))
+            if payload == {"placeholder": True}:
+                return _xml(build_nzb(payload), "application/x-nzb")
             payload["item"], payload["b_profile"], payload["title"], payload["size"]
         except (ValueError, KeyError, TypeError):
             return Response("bad payload", status_code=400)

@@ -142,7 +142,7 @@ def test_step_skips_cancelled(env):
     _cancel(env)
     step(env.store, env.server)
     assert env.job().state == "cancelled" and not (env.dir / "Dune.mkv").exists()
-    assert env.jobs.store.get(env.jid).outcome is None
+    assert env.jobs.store.get(env.jid).outcome == "cancelled" and env.job().reported  # unreported cancel is closed
 
 
 def test_step_cancel_during_download(env, monkeypatch):
@@ -184,3 +184,42 @@ def test_step_malformed_status_survives(env, monkeypatch):
     monkeypatch.setattr(env.server, "status", lambda i: {})
     step(env.store, env.server)
     assert env.job().state == "queued"
+
+
+def test_failed_close_is_retried_next_step(env, monkeypatch):
+    env.add()
+    real, calls = env.server.close, []
+
+    def flaky(jid, outcome):
+        calls.append(outcome)
+        if len(calls) == 1:
+            raise httpx.ConnectError("down")
+        real(jid, outcome)
+    monkeypatch.setattr(env.server, "close", flaky)
+    step(env.store, env.server)
+    assert env.job().state == "completed" and not env.job().reported
+    assert env.jobs.store.get(env.jid).closed_at is None
+    step(env.store, env.server)
+    assert env.job().reported and env.jobs.store.get(env.jid).outcome == "delivered"
+    step(env.store, env.server)
+    assert calls == ["delivered", "delivered"]
+
+
+def test_server_retried_state_fails_agent_job(env, monkeypatch):
+    env.add()
+    monkeypatch.setattr(env.server, "status", lambda i: {"state": "retried", "progress": 0.0, "error": None, "files": []})
+    step(env.store, env.server)
+    assert (env.job().state, env.job().fail_message) == ("failed", "Relancé chez A")
+
+
+def test_progress_write_never_resurrects_cancelled(env):
+    env.add("transferring")
+    assert env.store.set_done("n1", 10) and env.job().done == 10
+    _cancel(env)
+    assert not env.store.set_done("n1", 20)
+    assert (env.job().state, env.job().done) == ("cancelled", 10)
+
+
+def test_server_client_has_read_timeout():
+    t = ServerClient("http://x", "t").client.timeout
+    assert (t.read, t.connect) == (300, 30)
