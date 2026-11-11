@@ -1,0 +1,27 @@
+token = "change-me"
+admin_password = "change-me"
+bandwidth_mbps = 200
+[radarr]
+url = "http://radarr:7878"
+key = "..."
+root_folder = "/movies"
+[sonarr]
+url = "http://sonarr:8989"
+key = "..."
+root_folder = "/tv"
+[qbittorrent]
+url = "http://qbittorrent:8080"
+user = "admin"
+password = "..."
+[retention]
+keep_days = 7
+seed_days = 3
+fail_days = 7
+[sizes]
+movie_gb = 8
+episode_gb = 2
+[profiles."HD-1080p FR"]
+a_profiles = ["1080p MULTi"]
+min_resolution = 1080
+languages = ["French"]
+announce = "MULTi.1080p.WEB-DL"
