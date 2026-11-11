@@ -1,7 +1,10 @@
+import base64
+import json
 import logging
 import os
 import secrets
 import time
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from fastapi import APIRouter, Request
@@ -18,26 +21,42 @@ MB = 2**20
 def router(cfg, store, server) -> APIRouter:
     r = APIRouter()
 
-    def add(data: bytes, cat: str) -> dict:
+    root = os.path.abspath(cfg.complete_dir)
+
+    def inside(path: str) -> bool:
+        p = os.path.abspath(path)
+        return p != root and os.path.commonpath([p, root]) == root
+
+    def add(payload: dict, cat: str) -> dict:
         try:
-            payload = parse_nzb(data)
-            item, prof, title = Item.from_key(payload["item"]), payload["b_profile"], payload["title"]
-            size = payload["size"]
-            sid = server.request(item, prof, title)
-        except (httpx.HTTPError, ValueError, KeyError) as e:
+            item, prof, title, size = payload["item"], payload["b_profile"], payload["title"], payload["size"]
+            if not (isinstance(item, str) and isinstance(prof, str) and isinstance(title, str)
+                    and isinstance(size, int) and not isinstance(size, bool)):
+                raise ValueError("bad payload")
+            if cat not in ("", "*") and cat not in cfg.categories:
+                raise ValueError("unknown category")
+            if (not title or title in (".", "..") or "/" in title or "\\" in title
+                    or os.path.basename(title) != title or os.path.isabs(title)):
+                raise ValueError("bad title")
+            storage = os.path.join(*[cfg.complete_dir] + ([cat] if cat not in ("", "*") else []) + [title])
+            if not inside(storage):
+                raise ValueError("bad storage path")
+            sid = server.request(Item.from_key(item), prof, title)
+            nzo = "SABnzbd_nzo_" + secrets.token_hex(8)
+            store.add(AgentJob(nzo, sid, title, cat, "queued", size, 0.0, 0, storage, None, False, time.time()))
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
             return {"status": False, "error": str(e) or type(e).__name__}
-        nzo = "SABnzbd_nzo_" + secrets.token_hex(8)
-        parts = [cfg.complete_dir] + ([cat] if cat not in ("", "*") else []) + [title]
-        store.add(AgentJob(nzo, sid, title, cat, "queued", size, 0.0, 0, os.path.join(*parts), None, False, time.time()))
         return {"status": True, "nzo_ids": [nzo]}
 
     def clean_parts(storage: str) -> None:
-        for root, _, files in os.walk(storage, topdown=False):
+        if not inside(storage):
+            return
+        for dirpath, _, files in os.walk(storage, topdown=False):
             for f in files:
                 if f.endswith(".part"):
-                    os.remove(os.path.join(root, f))
+                    os.remove(os.path.join(dirpath, f))
             try:
-                os.rmdir(root)
+                os.rmdir(dirpath)
             except OSError:
                 pass
 
@@ -103,14 +122,22 @@ def router(cfg, store, server) -> APIRouter:
         if mode == "fullstatus":
             return {"status": {"completedir": cfg.complete_dir}}
         if mode == "addfile" and upload is not None:
-            return add(upload, p.get("cat", ""))
-        if mode == "addurl":
             try:
-                resp = httpx.get(p.get("name", ""), follow_redirects=True, timeout=30)
-                resp.raise_for_status()
-            except (httpx.HTTPError, ValueError) as e:
-                return {"status": False, "error": str(e) or type(e).__name__}
-            return add(resp.content, p.get("cat", ""))
+                return add(parse_nzb(upload), p.get("cat", ""))
+            except ValueError as e:
+                return {"status": False, "error": str(e)}
+        if mode == "addurl":
+            # our own newznab link only: decode locally, never fetch (SSRF)
+            try:
+                u = urlsplit(p.get("name", ""))
+                if not u.path.endswith("/newznab/nzb"):
+                    raise ValueError
+                payload = json.loads(base64.urlsafe_b64decode(parse_qs(u.query)["p"][0]))
+                if not isinstance(payload, dict):
+                    raise ValueError
+            except (ValueError, KeyError, IndexError):
+                return {"status": False, "error": "unsupported url"}
+            return add(payload, p.get("cat", ""))
         if mode == "queue":
             return queue(p)
         if mode == "history":

@@ -1,3 +1,5 @@
+import base64
+import json
 import time
 
 from fastapi import FastAPI
@@ -98,3 +100,42 @@ def test_history_completed_failed_and_delete(tmp_path):
 def test_sab_bad_apikey(tmp_path):
     c, *_ = setup(tmp_path)
     assert c.get("/sabnzbd/api", params={"mode": "version", "apikey": "no"}).json() == {"status": False, "error": "API Key Incorrect"}
+
+
+def _add(c, payload, cat="radarr"):
+    return c.post("/sabnzbd/api", params={"mode": "addfile", "apikey": "key", "cat": cat},
+                  files={"name": ("x.nzb", build_nzb(payload))}).json()
+
+
+def test_addfile_rejects_unsafe(tmp_path):
+    c, _, store, srv = setup(tmp_path)
+    for payload, cat in [({**PAYLOAD, "title": "../../x"}, "radarr"), ({**PAYLOAD, "title": str(tmp_path)}, "radarr"),
+                         ({**PAYLOAD, "title": ".."}, "radarr"), (PAYLOAD, ".."), (PAYLOAD, "nope"),
+                         ({**PAYLOAD, "size": "big"}, "radarr")]:
+        assert _add(c, payload, cat)["status"] is False
+    assert store.all() == [] and srv.calls == []
+
+
+def test_addurl_local_decode_only(tmp_path):
+    c, _, store, srv = setup(tmp_path)
+    p = base64.urlsafe_b64encode(json.dumps(PAYLOAD).encode()).decode()
+    ok = c.get("/sabnzbd/api", params={"mode": "addurl", "apikey": "key", "cat": "radarr",
+                                        "name": f"http://a/newznab/nzb?apikey=k&p={p}"}).json()
+    assert ok["status"] is True and len(srv.calls) == 1
+    bad = c.get("/sabnzbd/api", params={"mode": "addurl", "apikey": "key", "name": "http://evil/x.nzb"}).json()
+    assert bad["status"] is False and "evil" not in bad["error"] and len(store.all()) == 1
+
+
+def test_server_errors(tmp_path):
+    import httpx
+    c, _, store, srv = setup(tmp_path)
+
+    def boom(*a):
+        raise httpx.ConnectError("down")
+    srv.request = boom
+    assert _add(c, PAYLOAD)["status"] is False and store.all() == []
+    srv.request = lambda *a: 7
+    nzo = _add(c, PAYLOAD)["nzo_ids"][0]
+    srv.close = boom
+    c.get("/sabnzbd/api", params={"mode": "queue", "name": "delete", "value": nzo, "apikey": "key"})
+    assert store.get(nzo).state == "cancelled"
