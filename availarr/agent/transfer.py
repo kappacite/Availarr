@@ -23,7 +23,7 @@ def _key(item: Item | str) -> str:
 
 class ServerClient:
     def __init__(self, base_url: str, token: str, client: httpx.Client | None = None):
-        self.client = client or httpx.Client(base_url=base_url, timeout=httpx.Timeout(300, connect=30))
+        self.client = client or httpx.Client(base_url=base_url, timeout=httpx.Timeout(60, connect=30))
         self.headers = {"Authorization": f"Bearer {token}"}
 
     def _call(self, method: str, path: str, **kw) -> httpx.Response:
