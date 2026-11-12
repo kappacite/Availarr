@@ -1,13 +1,36 @@
 # Côté B : indexeur Newznab + client SABnzbd factices pour Radarr/Sonarr de B.
+#
+# Tailscale par défaut : le conteneur "tailscale" relie l'agent au server de A, rien d'autre n'est installé chez B.
+# Premier démarrage : mettre TS_AUTHKEY (clé fournie par A) dans un fichier .env à côté de ce compose.
 services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: availarr-agent
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: availarr-agent
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    ports:
+      - "8789:8789"   # pour le Radarr/Sonarr de B (et la page de première configuration)
+    networks:
+      default:
+        aliases: [availarr-agent]   # Radarr/Sonarr sur ce même réseau Docker joignent http://availarr-agent:8789
+
   availarr-agent:
     build: .
     restart: unless-stopped
     command: python -m availarr.agent
-    ports:
-      - "8789:8789"
+    network_mode: service:tailscale
+    depends_on: [tailscale]
     volumes:
-      - ./config:/config   # modifiable : la page de première configuration y écrit server.toml / agent.toml
-      - ./data:/data   # préparer : mkdir -p data && sudo chown 1000:1000 data
+      - ./config:/config   # modifiable : la page de première configuration y écrit agent.toml
+      - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
       # Dossier de téléchargements de B (complete_dir de agent.toml) ; sudo chown 1000:1000 sur ce dossier
       - /downloads:/downloads

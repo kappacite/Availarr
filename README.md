@@ -17,7 +17,7 @@ Availarr permet à B d'utiliser la médiathèque de A comme source de téléchar
 
 1. Dans `compose.server.yml`, monter le dossier des médias de A **au même chemin** que dans le Radarr/Sonarr de A (le server lit les fichiers à ce chemin).
 2. Préparer les dossiers (le conteneur tourne en uid 1000) : `mkdir -p config data && sudo chown 1000:1000 config data`.
-3. Définir `TAILSCALE_IP` (IP `tailscale0` de A) : l'API (HTTP + token) n'est publiée que sur cette IP (par défaut `127.0.0.1`). Lier à l'IP tailscale0 ou filtrer le port 8787 au pare-feu, sauf si un reverse proxy HTTPS le précède. Le panel est lié à `127.0.0.1:8788` ; pour le LAN, voir le commentaire de `compose.server.yml`.
+3. Tailscale : créer `.env` avec `TS_AUTHKEY=...` (voir « Réseau entre A et B » ci-dessous). L'API 8787 n'est joignable que par Tailscale ; le panel est lié à `127.0.0.1:8788` (pour le LAN, voir le commentaire de `compose.server.yml`).
 4. `docker compose -f compose.server.yml up -d --build`
 5. **Première configuration** : sans `config/server.toml`, le server ouvre une page de configuration sur le port du panel, `http://127.0.0.1:8788`. Saisis le code affiché par `docker compose -f compose.server.yml logs`, remplis le formulaire (les boutons « Tester » vérifient chaque service et proposent tes profils et dossiers), puis enregistre : le fichier est écrit et le server démarre. Note le **jeton partagé** affiché en haut, il sert à l'agent.
 
@@ -38,9 +38,18 @@ Sans Docker : `pip install .` puis `python -m availarr.server` ou `python -m ava
 
 ### Réseau entre A et B
 
-- **Recommandé : Tailscale.** A et B sur le même tailnet, `server_url = "http://<nom-tailscale-de-A>:8787"`. Rien n'est exposé sur Internet.
-- **Alternative : reverse proxy HTTPS** (Caddy, Traefik, nginx) devant le port 8787 de A, avec `server_url = "https://..."`. Le `token` est alors la seule protection : le choisir long et aléatoire.
-- **À éviter : Cloudflare Tunnel** (ou proxy Cloudflare) pour les fichiers. Il limite la taille des requêtes/le débit et interdit en pratique le transfert de gros fichiers vidéo.
+**Par défaut : Tailscale dans les conteneurs.** Chaque compose contient un conteneur `tailscale` qui porte le réseau du server ou de l'agent. Rien d'autre à installer, ni chez A ni chez B, et ton frère n'a pas besoin de compte Tailscale : les deux conteneurs rejoignent **ton** tailnet. La connexion est directe entre les deux maisons quand c'est possible (sinon par un relais Tailscale, plus lent). Prérequis : Linux avec `/dev/net/tun` (le cas de tout Docker sous Linux).
+
+1. **Règles d'accès** (une fois) : dans l'admin Tailscale, *Access controls*, fusionner `examples/tailscale-acl.hujson`. L'agent ne peut alors joindre **que** le port 8787 du server, rien d'autre de ton réseau.
+2. **Deux clés** dans *Settings > Keys > Generate auth key* : une avec le tag `tag:availarr-server` (pour toi), une avec le tag `tag:availarr-agent` (pour ton frère). Non réutilisables, pas éphémères.
+3. **Chez A** : à côté de `compose.server.yml`, un fichier `.env` contenant `TS_AUTHKEY=tskey-auth-...` (la clé server), puis `docker compose -f compose.server.yml up -d --build`. Le server affiche son adresse dans ses logs et sur sa page de configuration : `http://100.x.y.z:8787`.
+4. **Chez B** : même chose avec la clé agent dans le `.env` de `compose.agent.yml`. Dans la configuration de l'agent, `server_url` = l'adresse affichée par le server.
+
+La clé ne sert qu'au premier démarrage : l'identité est ensuite gardée dans `./tailscale` (à ne pas supprimer, ni publier). Une clé non utilisée expire au bout de 90 jours.
+
+**Sans Tailscale** : retirer le service `tailscale` et la ligne `network_mode` du compose, publier les ports sur le service Availarr, et mettre un **reverse proxy HTTPS** (Caddy, Traefik, nginx) devant le port 8787 de A, avec `server_url = "https://..."`. Le `token` est alors la seule protection.
+
+**À éviter : Cloudflare Tunnel** (ou proxy Cloudflare) pour les fichiers : ses conditions interdisent en pratique de servir de gros volumes vidéo, et le débit n'est pas garanti.
 
 Le **panel (8788) ne doit jamais être exposé à B** : il est protégé par `admin_password` mais réservé à A. Ne publier que le port 8787.
 

@@ -14,7 +14,7 @@ from availarr.server.qbit import QBit
 from availarr.server.radarr import Radarr
 from availarr.server.retention import tick
 from availarr.server.sonarr import Sonarr
-from availarr.setup import run_setup
+from availarr.setup import run_setup, tailscale_ip
 
 
 def build(cfg):
@@ -37,6 +37,8 @@ def main():
     if not os.path.exists(path):  # first run: web setup on the panel port, then carry on
         run_setup("server", path, load_server_config, port=8788)
     cfg = load_server_config(path)
+    if ts := tailscale_ip():
+        logging.warning("Adresse du server pour l'agent (Tailscale) : http://%s:%s", ts, cfg.api_port)
     api, panel, retention_once = build(cfg)
 
     def retention_loop():

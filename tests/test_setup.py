@@ -47,3 +47,31 @@ def test_agent_setup_and_test_endpoint_needs_code(tmp_path):
                               "public_url": "http://agent:8789", "complete_dir": "/dl",
                               "radarr_url": "http://r", "radarr_key": "1", "sonarr_url": "http://s", "sonarr_key": "2"})
     assert r.status_code == 200 and load_agent_config(str(path)).complete_dir == "/dl"
+
+
+def test_tailscale_ip(monkeypatch):
+    import socket
+    from availarr import setup
+
+    class S:
+        ip = ""
+
+        def __init__(self, *a):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def connect(self, addr):
+            pass
+
+        def getsockname(self):
+            return (S.ip, 1)
+    monkeypatch.setattr(socket, "socket", S)
+    S.ip = "100.101.102.103"
+    assert setup.tailscale_ip() == "100.101.102.103"
+    S.ip = "192.168.1.2"
+    assert setup.tailscale_ip() is None

@@ -1,0 +1,16 @@
+// À fusionner dans la politique d'accès de ton tailnet (admin Tailscale > Access controls).
+// L'agent de B ne peut joindre QUE le port 8787 du server : rien d'autre chez toi.
+{
+  "tagOwners": {
+    "tag:availarr-server": ["autogroup:admin"],
+    "tag:availarr-agent":  ["autogroup:admin"],
+  },
+  "acls": [
+    // Garde ici tes règles existantes (par défaut : {"action": "accept", "src": ["*"], "dst": ["*:*"]}).
+    // Si tu gardes la règle par défaut "*" -> "*:*", remplace-la par celle-ci pour que l'agent n'y ait pas droit :
+    {"action": "accept", "src": ["autogroup:member"], "dst": ["*:*"]},
+
+    // L'agent de B -> l'API du server, et rien d'autre.
+    {"action": "accept", "src": ["tag:availarr-agent"], "dst": ["tag:availarr-server:8787"]},
+  ],
+}

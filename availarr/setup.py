@@ -1,9 +1,11 @@
 """First-run web setup: when the config file is missing, serve a form that writes it, then hand over."""
+import ipaddress
 import json
 import logging
 import os
 import re
 import secrets
+import socket
 import tempfile
 from html import escape
 
@@ -60,6 +62,17 @@ function addRow(){
   document.getElementById('prows').appendChild(c);
 }
 """
+
+
+def tailscale_ip() -> str | None:
+    """This host's Tailscale IPv4 (100.64.0.0/10), if Tailscale runs in our network namespace."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("100.100.100.100", 53))  # no packet is sent: this only asks the kernel for the route
+            ip = s.getsockname()[0]
+    except OSError:
+        return None
+    return ip if ipaddress.ip_address(ip) in ipaddress.ip_network("100.64.0.0/10") else None
 
 
 def toml_dump(d: dict) -> str:
@@ -153,8 +166,12 @@ def server_form(v: dict) -> str:
             + '<button type="button" onclick="this.parentNode.remove()">Retirer</button></div>')
     rows_html = "".join(prow.format(**{k: escape(str(x)) for k, x in r.items()}) for r in rows)
     template = prow.format(name="", a="", res="1080", lang="", announce="1080p.WEB-DL")
+    ts = tailscale_ip()
+    where = (f"Adresse de ce server à donner à l'agent : <b>http://{ts}:8787</b> (Tailscale)." if ts else
+             "Tailscale n'est pas détecté ici : l'agent devra joindre ce server autrement (voir le README).")
     return (
-        _section("Accès", "Le jeton relie l'agent de B à ce server : recopie-le dans la configuration de l'agent.",
+        _section("Accès", "Le jeton relie l'agent de B à ce server : recopie-le dans la configuration de "
+                          f"l'agent. {where}",
                  _field("Jeton partagé", "token", g("token"), "readonly", wide=True)
                  + _field("Mot de passe du panel", "admin_password", g("admin_password", ""), "password",
                           hint="pour ouvrir ce panel")
@@ -195,8 +212,8 @@ def agent_form(v: dict) -> str:
     return (
         _section("Le server de A", "L'adresse du server chez A (Tailscale conseillé) et le jeton affiché sur "
                                    "sa page de configuration.",
-                 _field("Adresse du server", "server_url", g("server_url", "http://nom-tailscale-de-a:8787"),
-                        wide=True, test_key="url")
+                 _field("Adresse du server", "server_url", g("server_url", "http://100.x.y.z:8787"),
+                        wide=True, test_key="url", hint="affichée par le server de A (page de configuration, logs)")
                  + _field("Jeton partagé", "token", g("token", ""), wide=True, test_key="token"), "server")
         + _section("Côté B", "Ce que le Radarr et le Sonarr de B utilisent pour parler à l'agent.",
                    _field("Clé API de l'agent", "api_key", g("api_key"), "readonly",

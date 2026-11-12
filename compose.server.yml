@@ -1,17 +1,36 @@
-# Côté A : API (8787) + panel (8788). Le panel ne doit PAS être exposé à B.
+# Côté A : API (8787, joignable seulement par Tailscale) + panel (8788, local). Le panel ne doit PAS être exposé à B.
+#
+# Tailscale par défaut : le conteneur "tailscale" porte le réseau, le server tourne dans le même espace réseau.
+# Premier démarrage : mettre TS_AUTHKEY dans un fichier .env à côté de ce compose (voir README, « Réseau »).
+# L'identité Tailscale est ensuite gardée dans ./tailscale : la clé ne sert plus.
 services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: availarr-server
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: availarr-server
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    ports:
+      # Panel : local uniquement. Pour l'ouvrir sur le LAN, remplacer 127.0.0.1 par l'IP LAN de A
+      # (ex. "192.168.1.10:8788:8788"). Ne jamais l'exposer à B.
+      # L'API 8787 n'est volontairement pas publiée : l'agent la joint par Tailscale.
+      - "127.0.0.1:8788:8788"
+
   availarr-server:
     build: .
     restart: unless-stopped
-    ports:
-      # API (HTTP + token) : lier à l'IP tailscale0 de A (TAILSCALE_IP), ou n'exposer
-      # que derrière un reverse proxy HTTPS / un pare-feu.
-      - "${TAILSCALE_IP:-127.0.0.1}:8787:8787"
-      # Panel : local uniquement. Pour l'ouvrir sur le LAN, remplacer 127.0.0.1 par l'IP LAN de A
-      # (ex. "192.168.1.10:8788:8788"). Ne jamais l'exposer à B.
-      - "127.0.0.1:8788:8788"
+    network_mode: service:tailscale
+    depends_on: [tailscale]
     volumes:
-      - ./config:/config   # modifiable : la page de première configuration y écrit server.toml / agent.toml
-      - ./data:/data   # préparer : mkdir -p data && sudo chown 1000:1000 data
+      - ./config:/config   # modifiable : la page de première configuration y écrit server.toml
+      - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
       # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
       - /media:/media:ro
