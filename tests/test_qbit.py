@@ -72,8 +72,10 @@ def test_hash_lowercased_and_mismatch_is_absent():
     assert calls[-1][2]["hashes"] == [H]
 
 
-def test_progress_batches_valid_hashes():
-    q, calls = make([{"hash": H.upper(), "progress": 0.5}])
-    assert q.progress([H, "", "all", H]) == {H: 0.5}
+def test_live_batches_valid_hashes():
+    q, calls = make([{"hash": H.upper(), "progress": 0.5, "eta": 600}])
+    assert q.live([H, "", "all", H]) == {H: (0.5, 600)}
     assert [c for c in calls if c[1] == "/api/v2/torrents/info"]
-    assert make([])[0].progress(["bad"]) == {}
+    assert make([])[0].live(["bad"]) == {}
+    assert make([{"hash": H, "progress": 0.1, "eta": 8640000}])[0].live([H]) == {H: (0.1, None)}
+    assert make([{"hash": H, "progress": 1, "eta": 8640000}])[0].live([H]) == {H: (1.0, 0)}

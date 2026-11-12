@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -9,6 +10,11 @@ from availarr.agent.db import AgentStore
 from availarr.common import Item
 
 log = logging.getLogger(__name__)
+
+# Time left per SABnzbd job, shown by B's Radarr/Sonarr: A's torrent ETA + the transfer to B.
+ETA: dict[str, float] = {}
+# Last measured A -> B throughput (bytes/s). ponytail: in memory, 100 Mbit/s until the first transfer.
+RATE = [100e6 / 8]
 
 
 def _key(item: Item | str) -> str:
@@ -105,6 +111,9 @@ def step(store: AgentStore, server: ServerClient) -> None:
                 job.state, job.fail_message = "failed", st["error"]
             elif st["state"] == "pending":
                 job.phase = st["progress"]
+                torrent = st.get("eta")
+                # unknown torrent ETA (stalled, no torrent yet): at least show the transfer part
+                ETA[job.nzo_id] = (torrent or 0) + job.size / RATE[0]
             elif st["state"] == "ready":
                 _transfer(store, server, job, st["files"])
                 continue
@@ -131,15 +140,23 @@ def _transfer(store, server, job, files) -> None:
         return _save(store, job)
     job.state, job.size = "transferring", sum(f["size"] for f in files)
     _save(store, job)
-    base = 0
+    base, start = 0, [0.0, -1]  # (monotonic time, bytes) at the first chunk of this run
+
     for f in files:
         def progress(n, base=base):
             if not store.set_done(job.nzo_id, base + n):  # only done is persisted from here
                 raise Cancelled
+            now, have = time.monotonic(), base + n
+            if start[1] < 0:
+                start[:] = [now, have]
+            elif now - start[0] >= 2 and have > start[1]:
+                RATE[0] = (have - start[1]) / (now - start[0])
+                ETA[job.nzo_id] = max(0, job.size - have) / RATE[0]
         if store.get(job.nzo_id).state != "transferring":
             raise Cancelled
         server.download(job.server_job_id, f["index"], Path(job.storage) / f["name"], f["size"], progress)
         base += f["size"]
+    ETA.pop(job.nzo_id, None)
     job.done, job.state = base, "completed"
     _save(store, job)
     server.close(job.server_job_id, "delivered")

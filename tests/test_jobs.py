@@ -134,7 +134,7 @@ def test_refresh_unmapped_profile_fails_job(mk):
 def test_status_and_file_path(mk):
     j = mk(FakeLibrary([Unit("movie:603", True, True, GOOD)]))
     job = j.request(M, P, "T")
-    assert j.status(job) == {"state": "ready", "progress": 1.0, "error": None,
+    assert j.status(job) == {"state": "ready", "progress": 1.0, "eta": 0, "error": None,
                              "files": [{"index": 0, "name": "Dune.mkv", "size": 9_000_000_000}]}
     assert j.file_path(job, 0) == ("/m/Dune.mkv", 9_000_000_000)
     with pytest.raises(IndexError):
@@ -186,3 +186,27 @@ def test_reuse_keeps_keep_decision(mk, clock):
     j.close(j.store.get(a.id), "delivered")
     q = FakeQbit({})
     assert tick(j, q, 10**9) == [] and lib.removed == [] and j.store.get(a.id).deleted_at is None
+
+
+def test_status_eta_from_qbittorrent(mk):
+    class Lib(FakeLibrary):
+        def __init__(self, units):
+            super().__init__(units)
+            del self.progress  # FakeLibrary stores a plain value; use the method below
+
+        def progress(self, item, live=None):
+            return live(["a", "b"])["a"] if live else 0.0
+
+    class Q:
+        def __init__(self, etas):
+            self.etas = etas
+
+        def live(self, hashes):
+            return {h: (0.25, self.etas[h]) for h in hashes}
+
+    j = mk(Lib([NONE]))
+    job = j.request(M, P, "T")
+    j.qbit = Q({"a": 60, "b": 300})
+    assert j.status(job)["progress"] == 0.25 and j.status(job)["eta"] == 300
+    j.qbit = Q({"a": 60, "b": None})
+    assert j.status(job)["eta"] is None

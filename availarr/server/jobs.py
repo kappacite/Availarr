@@ -104,14 +104,22 @@ class Jobs:
     def status(self, job: Job) -> dict:
         if job.deleted_at is not None:
             return {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
-        progress = 0.0
+        progress, eta = 0.0, None
         if job.state == "ready":
-            progress = 1.0
+            progress, eta = 1.0, 0
+        elif job.state == "pending" and self.qbit:
+            etas: dict[str, int | None] = {}
+
+            def live(hashes):  # the library maps the item to its torrents; we keep their ETAs on the way
+                now = self.qbit.live(hashes)
+                etas.update({h: e for h, (_, e) in now.items()})
+                return {h: p for h, (p, _) in now.items()}
+            progress = self.lib(job.item).progress(job.item, live)
+            eta = max(etas.values()) if etas and None not in etas.values() else None
         elif job.state == "pending":
-            lib = self.lib(job.item)
-            progress = lib.progress(job.item, self.qbit.progress) if self.qbit else lib.progress(job.item)
+            progress = self.lib(job.item).progress(job.item)
         files = [{"index": i, "name": os.path.basename(f.path), "size": f.size} for i, f in enumerate(self._files(job))]
-        return {"state": job.state, "progress": progress, "error": job.error, "files": files}
+        return {"state": job.state, "progress": progress, "eta": eta, "error": job.error, "files": files}
 
     def file_path(self, job: Job, index: int) -> tuple[str, int]:
         files = self._files(job)

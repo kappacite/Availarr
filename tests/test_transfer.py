@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from availarr.agent.db import AgentJob, AgentStore
-from availarr.agent.transfer import ServerClient, step
+from availarr.agent.transfer import ETA, RATE, ServerClient, step
 from availarr.server.api import create_api
 from availarr.server.db import JobStore
 from availarr.server.jobs import Jobs
@@ -86,6 +86,13 @@ def test_step_pending_updates_phase(tmp_path):
     e.add()
     step(e.store, e.server)
     assert (e.job().phase, e.job().state) == (0.5, "queued")
+    # time left = torrent ETA (unknown here: no qBittorrent) + 1000 bytes at the learned rate
+    RATE[0] = 100.0
+    e.jobs.qbit = type("Q", (), {"live": lambda self, hs: {}})()
+    e.lib.progress = 0.5
+    step(e.store, e.server)
+    assert ETA.pop("n1") == 10.0
+    RATE[0] = 100e6 / 8
 
 
 def test_step_ready_transfers_and_completes(env):

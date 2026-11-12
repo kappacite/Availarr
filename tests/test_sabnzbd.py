@@ -69,6 +69,11 @@ def test_queue_percentage(tmp_path):
     store.add(job("a", "queued", phase=0.5, size=4 * 2**20))
     s = c.get("/sabnzbd/api", params={"mode": "queue", "apikey": "key"}).json()["queue"]["slots"][0]
     assert s["percentage"] == "25" and s["status"] == "Queued" and s["mb"] == "4.0" and s["mbleft"] == "3.0"
+    from availarr.agent.transfer import ETA
+    ETA["a"] = 3725
+    s = c.get("/sabnzbd/api", params={"mode": "queue", "apikey": "key"}).json()["queue"]["slots"][0]
+    assert s["timeleft"] == "1:02:05"
+    ETA.pop("a")
 
 
 def test_queue_delete_cancels(tmp_path):

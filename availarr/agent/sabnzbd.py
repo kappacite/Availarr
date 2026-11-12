@@ -12,10 +12,16 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from availarr.agent.db import AgentJob
+from availarr.agent.transfer import ETA
 from availarr.common import Item, parse_nzb
 
 log = logging.getLogger(__name__)
 MB = 2**20
+
+
+def _hms(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
 
 
 def router(cfg, store, server) -> APIRouter:
@@ -94,7 +100,7 @@ def router(cfg, store, server) -> APIRouter:
                 "nzo_id": j.nzo_id, "filename": j.name, "cat": j.cat,
                 "status": "Downloading" if j.state == "transferring" else "Queued",
                 "mb": "%.1f" % (j.size / MB), "mbleft": "%.1f" % (j.size * (1 - pct / 100) / MB),
-                "percentage": str(pct), "timeleft": "0:00:00", "priority": "Normal",
+                "percentage": str(pct), "timeleft": _hms(ETA.get(j.nzo_id, 0)), "priority": "Normal",
             })
         return {"queue": {"paused": False, "slots": slots}}
 

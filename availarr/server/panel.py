@@ -185,10 +185,12 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return bar("dl", label, 100, "Déjà chez toi", done=True)
         if job.state == "pending":
             try:
-                p = jobs.status(job)["progress"] * 100
+                st = jobs.status(job)
             except Exception:  # A's Radarr/Sonarr down: the page must still render
                 return bar("dl", label, None, "Téléchargement …")
-            return bar("dl", label, p, f"{round(p)} %", "en attente d'un torrent" if p == 0 else "", running=p > 0)
+            p, eta = st["progress"] * 100, st.get("eta")
+            extra = "en attente d'un torrent" if p == 0 else (f"reste {fmt_eta(eta)}" if eta else "")
+            return bar("dl", label, p, f"{round(p)} %", extra, running=p > 0)
         if job.state == "ready" or job.outcome:
             return bar("dl", label, 100, "Terminé", done=True)
         return bar("dl", label, None, "—")
