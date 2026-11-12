@@ -11,6 +11,7 @@ from availarr.agent.b_arr import BArr
 from availarr.agent.config import load_agent_config
 from availarr.agent.db import AgentStore
 from availarr.agent.transfer import ServerClient, step
+from availarr.setup import run_setup
 
 
 def build(cfg):
@@ -32,7 +33,10 @@ def build(cfg):
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    cfg = load_agent_config(os.environ.get("AVAILARR_CONFIG", "/config/agent.toml"))
+    path = os.environ.get("AVAILARR_CONFIG", "/config/agent.toml")
+    if not os.path.exists(path):  # first run: web setup on the agent port, then carry on
+        run_setup("agent", path, load_agent_config, port=8789)
+    cfg = load_agent_config(path)
     app, step_once = build(cfg)
 
     def loop():

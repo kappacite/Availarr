@@ -79,6 +79,10 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
             raise HTTPException(404, "unknown job")
         return job
 
+    @app.get("/v1/ping")
+    def ping():  # lets the agent's setup page check the URL and the token
+        return {"ok": True}
+
     @app.post("/v1/lookup")
     def lookup(body: LookupIn):
         return {"release": jobs.lookup(_item(body.item), body.b_profile)}

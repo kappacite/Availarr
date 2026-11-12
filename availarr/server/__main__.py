@@ -14,6 +14,7 @@ from availarr.server.qbit import QBit
 from availarr.server.radarr import Radarr
 from availarr.server.retention import tick
 from availarr.server.sonarr import Sonarr
+from availarr.setup import run_setup
 
 
 def build(cfg):
@@ -32,7 +33,10 @@ def build(cfg):
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    cfg = load_server_config(os.environ.get("AVAILARR_CONFIG", "/config/server.toml"))
+    path = os.environ.get("AVAILARR_CONFIG", "/config/server.toml")
+    if not os.path.exists(path):  # first run: web setup on the panel port, then carry on
+        run_setup("server", path, load_server_config, port=8788)
+    cfg = load_server_config(path)
     api, panel, retention_once = build(cfg)
 
     def retention_loop():

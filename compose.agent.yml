@@ -7,7 +7,7 @@ services:
     ports:
       - "8789:8789"
     volumes:
-      - ./config:/config:ro
+      - ./config:/config   # modifiable : la page de première configuration y écrit server.toml / agent.toml
       - ./data:/data   # préparer : mkdir -p data && sudo chown 1000:1000 data
       # Dossier de téléchargements de B (complete_dir de agent.toml) ; sudo chown 1000:1000 sur ce dossier
       - /downloads:/downloads

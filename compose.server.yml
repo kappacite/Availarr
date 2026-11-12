@@ -11,7 +11,7 @@ services:
       # (ex. "192.168.1.10:8788:8788"). Ne jamais l'exposer à B.
       - "127.0.0.1:8788:8788"
     volumes:
-      - ./config:/config:ro
+      - ./config:/config   # modifiable : la page de première configuration y écrit server.toml / agent.toml
       - ./data:/data   # préparer : mkdir -p data && sudo chown 1000:1000 data
       # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
       - /media:/media:ro

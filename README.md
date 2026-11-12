@@ -15,20 +15,24 @@ Availarr permet à B d'utiliser la médiathèque de A comme source de téléchar
 
 ### Côté A (server)
 
-1. Copier `examples/server.toml` vers `./config/server.toml` et le remplir (clés Radarr/Sonarr, qBittorrent, `token`, `admin_password`, table `[profiles]`).
-2. Dans `compose.server.yml`, monter le dossier des médias de A **au même chemin** que dans le Radarr/Sonarr de A (le server lit les fichiers à ce chemin).
-3. Préparer les dossiers (le conteneur tourne en uid 1000) : `mkdir -p config data && sudo chown 1000:1000 data`.
-4. Définir `TAILSCALE_IP` (IP `tailscale0` de A) : l'API (HTTP + token) n'est publiée que sur cette IP (par défaut `127.0.0.1`). Lier à l'IP tailscale0 ou filtrer le port 8787 au pare-feu, sauf si un reverse proxy HTTPS le précède. Le panel est lié à `127.0.0.1:8788` ; pour le LAN, voir le commentaire de `compose.server.yml`.
-5. `docker compose -f compose.server.yml up -d --build`
+1. Dans `compose.server.yml`, monter le dossier des médias de A **au même chemin** que dans le Radarr/Sonarr de A (le server lit les fichiers à ce chemin).
+2. Préparer les dossiers (le conteneur tourne en uid 1000) : `mkdir -p config data && sudo chown 1000:1000 config data`.
+3. Définir `TAILSCALE_IP` (IP `tailscale0` de A) : l'API (HTTP + token) n'est publiée que sur cette IP (par défaut `127.0.0.1`). Lier à l'IP tailscale0 ou filtrer le port 8787 au pare-feu, sauf si un reverse proxy HTTPS le précède. Le panel est lié à `127.0.0.1:8788` ; pour le LAN, voir le commentaire de `compose.server.yml`.
+4. `docker compose -f compose.server.yml up -d --build`
+5. **Première configuration** : sans `config/server.toml`, le server ouvre une page de configuration sur le port du panel, `http://127.0.0.1:8788`. Saisis le code affiché par `docker compose -f compose.server.yml logs`, remplis le formulaire (les boutons « Tester » vérifient chaque service et proposent tes profils et dossiers), puis enregistre : le fichier est écrit et le server démarre. Note le **jeton partagé** affiché en haut, il sert à l'agent.
+
+Tu peux aussi écrire `config/server.toml` à la main à partir de `examples/server.toml`. Pour refaire la configuration web, supprime ce fichier et redémarre le conteneur.
 
 Le fichier de config est lu depuis `/config/server.toml` (variable `AVAILARR_CONFIG` pour changer). Ports : **8787** API (pour l'agent), **8788** panel (local).
 
 ### Côté B (agent)
 
-1. Copier `examples/agent.toml` vers `./config/agent.toml` et le remplir (`server_url`, `token` identique à celui du server, `api_key` au choix, `public_url`, `complete_dir`, clés du Radarr/Sonarr de B).
-2. Monter le dossier de téléchargements de B sur `complete_dir`. Le conteneur tourne en utilisateur non-root (uid 1000) : ce dossier doit lui être accessible en écriture.
-3. `mkdir -p config data && sudo chown 1000:1000 data`, et `sudo chown 1000:1000` sur le dossier de téléchargements.
-4. `docker compose -f compose.agent.yml up -d --build`
+1. Monter le dossier de téléchargements de B sur `complete_dir`. Le conteneur tourne en utilisateur non-root (uid 1000) : ce dossier doit lui être accessible en écriture.
+2. `mkdir -p config data && sudo chown 1000:1000 config data`, et `sudo chown 1000:1000` sur le dossier de téléchargements.
+3. `docker compose -f compose.agent.yml up -d --build`
+4. **Première configuration** : ouvre `http://<hôte-de-B>:8789`, saisis le code affiché par `docker compose -f compose.agent.yml logs`, puis renseigne l'adresse du server et le jeton partagé (« Tester » vérifie les deux), le dossier de téléchargement et le Radarr/Sonarr de B. Note la **clé API de l'agent** : c'est elle qu'on met dans l'indexeur et le client SABnzbd de B. Le port 8789 sert ensuite à Radarr et Sonarr.
+
+Ou bien, à la main : copier `examples/agent.toml` vers `config/agent.toml` et le remplir.
 
 Sans Docker : `pip install .` puis `python -m availarr.server` ou `python -m availarr.agent`.
 
