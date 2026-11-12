@@ -1,7 +1,8 @@
 # Côté B : indexeur Newznab + client SABnzbd factices pour Radarr/Sonarr de B.
 #
 # Tailscale par défaut : le conteneur "tailscale" relie l'agent au server de A, rien d'autre n'est installé chez B.
-# Premier démarrage : mettre TS_AUTHKEY (clé fournie par A) dans un fichier .env à côté de ce compose.
+# Premier démarrage : la page de configuration (http://<hôte>:8789) affiche un lien Tailscale à envoyer
+# à A, qui l'accepte avec son compte. Optionnel : TS_AUTHKEY=... (clé fournie par A) dans un fichier .env.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -12,8 +13,11 @@ services:
       TS_HOSTNAME: availarr-agent
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
+      TS_EXTRA_ARGS: --advertise-tags=tag:availarr-agent
     volumes:
       - ./tailscale:/var/lib/tailscale
+      - tailscale-run:/var/run/tailscale
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add: [NET_ADMIN, NET_RAW]
@@ -30,7 +34,11 @@ services:
     network_mode: service:tailscale
     depends_on: [tailscale]
     volumes:
+      - tailscale-run:/var/run/tailscale
       - ./config:/config   # modifiable : la page de première configuration y écrit agent.toml
       - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
       # Dossier de téléchargements de B (complete_dir de agent.toml) ; sudo chown 1000:1000 sur ce dossier
       - /downloads:/downloads
+
+volumes:
+  tailscale-run:

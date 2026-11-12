@@ -1,8 +1,9 @@
 # Côté A : API (8787, joignable seulement par Tailscale) + panel (8788, local). Le panel ne doit PAS être exposé à B.
 #
 # Tailscale par défaut : le conteneur "tailscale" porte le réseau, le server tourne dans le même espace réseau.
-# Premier démarrage : mettre TS_AUTHKEY dans un fichier .env à côté de ce compose (voir README, « Réseau »).
-# L'identité Tailscale est ensuite gardée dans ./tailscale : la clé ne sert plus.
+# Premier démarrage : la page de configuration (http://127.0.0.1:8788) affiche « Connecter à Tailscale ».
+# Optionnel : TS_AUTHKEY=... dans un fichier .env à côté de ce compose, pour se connecter sans clic.
+# L'identité Tailscale est ensuite gardée dans ./tailscale.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -13,8 +14,11 @@ services:
       TS_HOSTNAME: availarr-server
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
+      TS_EXTRA_ARGS: --advertise-tags=tag:availarr-server
     volumes:
       - ./tailscale:/var/lib/tailscale
+      - tailscale-run:/var/run/tailscale
     devices:
       - /dev/net/tun:/dev/net/tun
     cap_add: [NET_ADMIN, NET_RAW]
@@ -30,7 +34,11 @@ services:
     network_mode: service:tailscale
     depends_on: [tailscale]
     volumes:
+      - tailscale-run:/var/run/tailscale
       - ./config:/config   # modifiable : la page de première configuration y écrit server.toml
       - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
       # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
       - /media:/media:ro
+
+volumes:
+  tailscale-run:

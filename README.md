@@ -40,12 +40,13 @@ Sans Docker : `pip install .` puis `python -m availarr.server` ou `python -m ava
 
 **Par défaut : Tailscale dans les conteneurs.** Chaque compose contient un conteneur `tailscale` qui porte le réseau du server ou de l'agent. Rien d'autre à installer, ni chez A ni chez B, et ton frère n'a pas besoin de compte Tailscale : les deux conteneurs rejoignent **ton** tailnet. La connexion est directe entre les deux maisons quand c'est possible (sinon par un relais Tailscale, plus lent). Prérequis : Linux avec `/dev/net/tun` (le cas de tout Docker sous Linux).
 
-1. **Règles d'accès** (une fois) : dans l'admin Tailscale, *Access controls*, fusionner `examples/tailscale-acl.hujson`. L'agent ne peut alors joindre **que** le port 8787 du server, rien d'autre de ton réseau.
-2. **Deux clés** dans *Settings > Keys > Generate auth key* : une avec le tag `tag:availarr-server` (pour toi), une avec le tag `tag:availarr-agent` (pour ton frère). Non réutilisables, pas éphémères.
-3. **Chez A** : à côté de `compose.server.yml`, un fichier `.env` contenant `TS_AUTHKEY=tskey-auth-...` (la clé server), puis `docker compose -f compose.server.yml up -d --build`. Le server affiche son adresse dans ses logs et sur sa page de configuration : `http://100.x.y.z:8787`.
-4. **Chez B** : même chose avec la clé agent dans le `.env` de `compose.agent.yml`. Dans la configuration de l'agent, `server_url` = l'adresse affichée par le server.
+1. **Règles d'accès** (une fois, avant tout) : ouvre l'admin Tailscale (https://login.tailscale.com/admin), onglet *Access controls*, et fusionne `examples/tailscale-acl.hujson`. Elles déclarent les tags `tag:availarr-server` et `tag:availarr-agent`, et l'agent ne peut joindre **que** le port 8787 du server. Sans elles, la connexion des conteneurs est refusée.
+2. **Chez A** : `docker compose -f compose.server.yml up -d --build`, puis ouvre la page de configuration (`http://127.0.0.1:8788`). Dans le bloc Tailscale, saisis le code de configuration puis clique sur **Connecter à Tailscale** et connecte-toi. Le bloc passe à « Connecté » et affiche l'adresse à donner à l'agent : `http://100.x.y.z:8787`.
+3. **Chez B** : `docker compose -f compose.agent.yml up -d --build`, puis la page de configuration de l'agent (`http://<hôte-de-B>:8789`). Le bloc Tailscale affiche un **lien de connexion** : ton frère te l'envoie, tu l'ouvres sur ton navigateur et tu acceptes avec ton compte. L'agent rejoint ton réseau, sans compte Tailscale de son côté. Dans le même formulaire, `Adresse du server` = l'adresse affichée par le server.
 
-La clé ne sert qu'au premier démarrage : l'identité est ensuite gardée dans `./tailscale` (à ne pas supprimer, ni publier). Une clé non utilisée expire au bout de 90 jours.
+L'identité Tailscale est ensuite gardée dans `./tailscale` (à ne pas supprimer, ni publier) : rien à refaire aux redémarrages.
+
+**Variante sans clic** : dans l'admin, *Settings > Keys > Generate auth key*, une clé avec le tag voulu, à mettre dans un fichier `.env` à côté du compose (`TS_AUTHKEY=tskey-auth-...`). Le conteneur se connecte alors seul au premier démarrage.
 
 **Sans Tailscale** : retirer le service `tailscale` et la ligne `network_mode` du compose, publier les ports sur le service Availarr, et mettre un **reverse proxy HTTPS** (Caddy, Traefik, nginx) devant le port 8787 de A, avec `server_url = "https://..."`. Le `token` est alors la seule protection.
 

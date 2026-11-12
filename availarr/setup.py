@@ -11,7 +11,7 @@ from html import escape
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from availarr.ui import CSS, LOGO
@@ -39,6 +39,9 @@ input[readonly]{color:var(--ivory)}
 .prow button{margin-bottom:1px}
 .actions{display:flex;justify-content:flex-end;gap:12px;align-items:center}
 button.primary{background:var(--ivory);color:#1b2130;border-color:var(--ivory);font-weight:600;padding:9px 18px}
+a.btn{display:inline-block;margin-top:4px;background:var(--ivory);color:#1b2130;text-decoration:none;
+font-weight:600;padding:8px 16px;border-radius:8px}
+p.ok{color:var(--ok);margin:0}
 .error{background:rgba(226,101,111,.12);border:1px solid rgba(226,101,111,.5);color:#f6c2c6;padding:10px 14px;
 border-radius:10px;margin:0 0 18px}
 @media (max-width:720px){.grid,.prow{grid-template-columns:1fr}}
@@ -57,6 +60,10 @@ async function test(btn){
     if(r.roots){const d=document.getElementById('roots-'+f.kind);d.innerHTML=r.roots.map(p=>'<option value="'+p.replace(/"/g,'&quot;')+'">').join('')}
   }catch(e){out.className='ko';out.textContent='Pas de réponse du service de configuration.'}
 }
+async function ts(){
+  try{const r=await fetch('/tailscale?code='+encodeURIComponent(code()));if(r.ok)document.getElementById('ts').innerHTML=await r.text()}catch(e){}
+}
+setInterval(ts,3000);document.addEventListener('input',e=>{if(e.target.name==='setup_code')ts()});
 function addRow(){
   const t=document.getElementById('prow'),c=t.content.cloneNode(true);
   document.getElementById('prows').appendChild(c);
@@ -73,6 +80,55 @@ def tailscale_ip() -> str | None:
     except OSError:
         return None
     return ip if ipaddress.ip_address(ip) in ipaddress.ip_network("100.64.0.0/10") else None
+
+
+TS_SOCKET = os.environ.get("AVAILARR_TS_SOCKET", "/var/run/tailscale/tailscaled.sock")
+
+
+def tailscale_status(sock: str = TS_SOCKET) -> dict | None:
+    """Read-only status from the Tailscale sidecar's local API (shared socket); None when there is no sidecar."""
+    if not os.path.exists(sock):
+        return None
+    try:
+        with httpx.Client(transport=httpx.HTTPTransport(uds=sock), timeout=5) as c:
+            r = c.get("http://local-tailscaled.sock/localapi/v0/status")
+            r.raise_for_status()
+            return r.json()
+    except (httpx.HTTPError, ValueError):
+        return {"BackendState": "Unreachable"}
+
+
+def tailscale_view(st: dict | None, kind: str, show_url: bool) -> str:
+    """What the setup page says about Tailscale, including the login link once the setup code is typed."""
+    if st is None:
+        return ("<p class=\"hint\">Tailscale n'est pas utilisé par ce conteneur. Sans lui, l'agent doit joindre le "
+                "server autrement (voir le README, « Réseau »).</p>")
+    state = st.get("BackendState", "")
+    if state == "Running":
+        ips = (st.get("Self") or {}).get("TailscaleIPs") or []
+        ip = next((i for i in ips if "." in i), "")
+        net = (st.get("CurrentTailnet") or {}).get("Name", "")
+        extra = (f" Adresse de ce server à donner à l'agent : <b>http://{escape(ip)}:8787</b>."
+                 if kind == "server" and ip else "")
+        return (f'<p class="ok">Connecté à Tailscale{f" ({escape(net)})" if net else ""}, '
+                f"adresse {escape(ip)}.{extra}</p>")
+    if state == "NeedsMachineAuth":
+        return ("<p class=\"hint\">Connexion faite. La machine attend ton approbation dans l'admin Tailscale "
+                "(onglet Machines).</p>")
+    url = st.get("AuthURL", "")
+    if state == "NeedsLogin" and url:
+        if not show_url:
+            return '<p class="hint">Saisis le code de configuration ci-dessus pour afficher le lien de connexion.</p>'
+        link = f'<a class="btn" href="{escape(url)}" target="_blank" rel="noopener">Connecter à Tailscale</a>'
+        if kind == "server":
+            return (f'<p class="hint">Connecte-toi avec ton compte Tailscale : cette machine rejoint ton réseau.</p>'
+                    f"{link}")
+        return ("<p class=\"hint\">Envoie ce lien à A. Il l'ouvre dans son navigateur, se connecte à son compte "
+                "Tailscale et accepte : l'agent rejoint son réseau, sans compte de ton côté.</p>"
+                f'<input readonly value="{escape(url)}" onclick="this.select()"><p>{link}</p>')
+    if state == "Unreachable":
+        return '<p class="hint">Tailscale ne répond pas encore, nouvel essai dans quelques secondes.</p>'
+    return f'<p class="hint">Tailscale démarre ({escape(state or "état inconnu")}).</p>'
 
 
 def toml_dump(d: dict) -> str:
@@ -300,6 +356,10 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
                 + _section("Code de configuration", "Lis-le avec <code>docker compose logs</code>. Il évite qu'une "
                            "autre personne sur le réseau configure le service à ta place.",
                            _field("Code", "setup_code", values.get("setup_code", ""), wide=True))
+                + '<fieldset class="card"><legend>Tailscale</legend><p class="hint">La liaison entre A et B. '
+                  "Première fois : ajoute d'abord les règles de <code>examples/tailscale-acl.hujson</code> dans "
+                  "l'admin Tailscale (Access controls), sinon la connexion est refusée.</p>"
+                  f'<div id="ts">{tailscale_view(tailscale_status(), kind, False)}</div></fieldset>'
                 + form
                 + '<div class="actions"><button class="primary">Enregistrer et démarrer</button></div></form></main>'
                 f"<script>{SETUP_JS}</script></body></html>")
@@ -307,6 +367,10 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
     @app.get("/", response_class=HTMLResponse)
     def index():
         return page(dict(first))
+
+    @app.get("/tailscale", response_class=HTMLResponse)
+    def tailscale(code_: str = Query("", alias="code")):
+        return tailscale_view(tailscale_status(), kind, secrets.compare_digest(code_.strip().upper(), code))
 
     @app.post("/test")
     async def test(request: Request):
