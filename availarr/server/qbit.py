@@ -38,6 +38,18 @@ class QBit:
         t = self._req("GET", "/torrents/info", params={"hashes": h}).json()
         return next((x["seeding_time"] for x in t if x.get("hash", "").lower() == h), None)
 
+    def progress(self, hashes: list[str]) -> dict[str, float]:
+        ok = []
+        for h in hashes:
+            try:
+                ok.append(_norm(h))
+            except ValueError:
+                pass
+        if not ok:
+            return {}
+        t = self._req("GET", "/torrents/info", params={"hashes": "|".join(dict.fromkeys(ok))}).json()
+        return {x["hash"].lower(): float(x["progress"]) for x in t if x.get("hash")}
+
     def delete(self, h: str) -> None:
         h = _norm(h)
         self._req("POST", "/torrents/delete", data={"hashes": h, "deleteFiles": "true"})

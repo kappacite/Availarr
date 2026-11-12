@@ -117,3 +117,14 @@ def test_unknown_profile_and_empty_lookup_raise():
     r, _ = make({})
     with pytest.raises(ValueError):
         r.title(ITEM)
+
+
+def test_progress_prefers_live_qbittorrent():
+    q = [{"size": 100, "sizeleft": 50, "downloadId": "ABC"}]
+    r, _ = make({("GET", "/api/v3/movie"): [MOVIE], ("GET", "/api/v3/queue/details"): q})
+    assert r.progress(ITEM, lambda hs: {"abc": 0.9}) == 0.9
+    assert r.progress(ITEM, lambda hs: {}) == 0.5
+
+    def down(hs):
+        raise RuntimeError("qbit down")
+    assert r.progress(ITEM, down) == 0.5

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import httpx
 
 from availarr.common import Item
-from availarr.server.library import Unit
+from availarr.server.library import Live, Unit, queue_progress
 from availarr.server.quality import FileInfo
 
 
@@ -84,13 +84,11 @@ class Radarr:
         self._req("POST", "/command", json={"name": "MoviesSearch", "movieIds": [m["id"]]})
         return False
 
-    def progress(self, item: Item) -> float:
+    def progress(self, item: Item, live: Live | None = None) -> float:
         m = self._movie(item)
         if m is None:
             return 0.0
-        q = self._req("GET", "/queue/details", params={"movieId": m["id"]})
-        total = sum(e["size"] for e in q)
-        return sum(e["size"] - e["sizeleft"] for e in q) / total if total else 0.0
+        return queue_progress(self._req("GET", "/queue/details", params={"movieId": m["id"]}), live)
 
     def hashes(self, item: Item, since: float, exclude_keys: list[str]) -> list[str]:
         m = self._movie(item)

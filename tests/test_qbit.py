@@ -70,3 +70,10 @@ def test_hash_lowercased_and_mismatch_is_absent():
     q, calls = make([])
     q.delete(H.upper())
     assert calls[-1][2]["hashes"] == [H]
+
+
+def test_progress_batches_valid_hashes():
+    q, calls = make([{"hash": H.upper(), "progress": 0.5}])
+    assert q.progress([H, "", "all", H]) == {H: 0.5}
+    assert [c for c in calls if c[1] == "/api/v2/torrents/info"]
+    assert make([])[0].progress(["bad"]) == {}

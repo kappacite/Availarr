@@ -19,7 +19,7 @@ from availarr.server.sonarr import Sonarr
 def build(cfg):
     qbit = QBit(cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass)
     jobs = Jobs(JobStore(cfg.db_path), Radarr(cfg.radarr_url, cfg.radarr_key, cfg.radarr_root),
-                Sonarr(cfg.sonarr_url, cfg.sonarr_key, cfg.sonarr_root), cfg)
+                Sonarr(cfg.sonarr_url, cfg.sonarr_key, cfg.sonarr_root), cfg, qbit=qbit)
 
     def retention_once():
         try:

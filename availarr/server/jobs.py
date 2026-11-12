@@ -13,8 +13,9 @@ log = logging.getLogger(__name__)
 
 
 class Jobs:
-    def __init__(self, store: JobStore, radarr: Library, sonarr: Library, cfg: ServerConfig, clock=time.time):
-        self.store, self.radarr, self.sonarr, self.cfg, self.clock = store, radarr, sonarr, cfg, clock
+    def __init__(self, store: JobStore, radarr: Library, sonarr: Library, cfg: ServerConfig, clock=time.time,
+                 qbit=None):
+        self.store, self.radarr, self.sonarr, self.cfg, self.clock, self.qbit = store, radarr, sonarr, cfg, clock, qbit
         self.unmapped: set[str] = set()
         self._lock = threading.Lock()  # ponytail: process-wide lock, fine for one agent
         self.transfer: dict[int, tuple[int, int]] = {}  # job id -> (bytes served, total); filled by the API
@@ -103,7 +104,12 @@ class Jobs:
     def status(self, job: Job) -> dict:
         if job.deleted_at is not None:
             return {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
-        progress = 1.0 if job.state == "ready" else self.lib(job.item).progress(job.item) if job.state == "pending" else 0.0
+        progress = 0.0
+        if job.state == "ready":
+            progress = 1.0
+        elif job.state == "pending":
+            lib = self.lib(job.item)
+            progress = lib.progress(job.item, self.qbit.progress) if self.qbit else lib.progress(job.item)
         files = [{"index": i, "name": os.path.basename(f.path), "size": f.size} for i, f in enumerate(self._files(job))]
         return {"state": job.state, "progress": progress, "error": job.error, "files": files}
 

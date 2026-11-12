@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import httpx
 
 from availarr.common import Item
-from availarr.server.library import Unit
+from availarr.server.library import Live, Unit, queue_progress
 from availarr.server.quality import FileInfo
 from availarr.server.radarr import _epoch
 
@@ -112,14 +112,13 @@ class Sonarr:
             self._req("POST", "/command", json=cmd)
         return created
 
-    def progress(self, item: Item) -> float:
+    def progress(self, item: Item, live: Live | None = None) -> float:
         s = self._series(item)
         if s is None:
             return 0.0
         ids = {e["id"] for e in self._eps(s["id"], item)}
         q = [e for e in self._req("GET", "/queue/details", params={"seriesId": s["id"]}) if e.get("episodeId") in ids]
-        total = sum(e["size"] for e in q)
-        return sum(e["size"] - e["sizeleft"] for e in q) / total if total else 0.0
+        return queue_progress(q, live)
 
     def hashes(self, item: Item, since: float, exclude_keys: list[str]) -> list[str]:
         s = self._series(item)
