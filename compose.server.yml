@@ -16,6 +16,7 @@ services:
       TS_USERSPACE: "false"
       TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
       TS_EXTRA_ARGS: --advertise-tags=tag:availarr-server
+      TS_TAILSCALED_EXTRA_ARGS: --port=41641   # port UDP fixe, à rediriger sur la box : liaison directe au lieu du relais
     volumes:
       - ./tailscale:/var/lib/tailscale
       - tailscale-run:/var/run/tailscale
@@ -27,6 +28,9 @@ services:
       # (ex. "192.168.1.10:8788:8788"). Ne jamais l'exposer à B.
       # L'API 8787 n'est volontairement pas publiée : l'agent la joint par Tailscale.
       - "127.0.0.1:8788:8788"
+      # Tailscale (WireGuard) : rediriger UDP 41641 de la box vers cette machine. Sans ça, le trafic passe par
+      # les relais DERP de Tailscale, limités à quelques Mbit/s. Ne répond qu'aux machines du tailnet.
+      - "41641:41641/udp"
 
   availarr-server:
     build: .

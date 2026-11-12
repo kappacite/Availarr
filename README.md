@@ -46,6 +46,8 @@ Sans Docker : `pip install .` puis `python -m availarr.server` ou `python -m ava
 
 L'identité Tailscale est ensuite gardée dans `./tailscale` (à ne pas supprimer, ni publier) : rien à refaire aux redémarrages.
 
+**Débit** : redirige le port **UDP 41641** de la box de A vers le server (le compose le publie déjà). Sinon Tailscale relaie le trafic par ses serveurs DERP, bridés à quelques Mbit/s. Vérification depuis B : `docker compose exec tailscale tailscale ping <ip-du-server>` doit répondre `via <ip>:<port>`, pas `via DERP`.
+
 **Variante sans clic** : dans l'admin, *Settings > Keys > Generate auth key*, une clé avec le tag voulu, à mettre dans un fichier `.env` à côté du compose (`TS_AUTHKEY=tskey-auth-...`). Le conteneur se connecte alors seul au premier démarrage.
 
 **Sans Tailscale** : retirer le service `tailscale` et la ligne `network_mode` du compose, publier les ports sur le service Availarr, et mettre un **reverse proxy HTTPS** (Caddy, Traefik, nginx) devant le port 8787 de A, avec `server_url = "https://..."`. Le `token` est alors la seule protection.
