@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import secrets
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 from availarr.common import Item
 from availarr.server.config import ServerConfig
 from availarr.server.jobs import Jobs
+
+log = logging.getLogger(__name__)
 
 
 class LookupIn(BaseModel):
@@ -92,8 +95,13 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
             raise HTTPException(410, "deleted")
         try:
             path, _ = jobs.file_path(job, index)
+        except IndexError:
+            raise HTTPException(404, "unknown file")
+        try:
             size = os.stat(path).st_size  # the disk is the truth, not the recorded size
-        except (IndexError, OSError):
+        except OSError as e:
+            log.warning("job %s: cannot read %s (mount A's media at the same path as in Radarr/Sonarr): %s",
+                        id, path, e)
             raise HTTPException(404, "unknown file")
         start, status_code = 0, 200
         if m := re.fullmatch(r"bytes=(\d+)-", request.headers.get("range", "")):
