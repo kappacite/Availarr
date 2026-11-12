@@ -234,7 +234,7 @@ def test_progress_write_never_resurrects_cancelled(env):
 
 def test_server_client_has_read_timeout():
     t = ServerClient("http://x", "t").client.timeout
-    assert (t.read, t.connect) == (300, 30)
+    assert (t.read, t.connect) == (60, 30)
 
 
 def test_close_retry_error_does_not_abort_step(env, monkeypatch):
