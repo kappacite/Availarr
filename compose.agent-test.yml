@@ -1,0 +1,69 @@
+# Banc d'essai côté B : Tailscale + agent + un Radarr « de B » vierge, sur une seule machine.
+#
+#   mkdir -p test-b/{config,agent-data,radarr,media/downloads/complete,media/movies}
+#   sudo chown -R ${PUID:-1000}:${PGID:-1000} test-b
+#   docker compose -f compose.agent-test.yml up -d --build
+#
+# Puis :
+#   - page de configuration de l'agent : http://<hôte>:8789  (code : docker compose -f compose.agent-test.yml logs availarr-agent)
+#       Adresse du server        = celle affichée par le server de A (http://100.x.y.z:8787)
+#       Adresse de l'agent       = http://availarr-agent:8789
+#       Dossier de téléchargement = /b/downloads/complete
+#       Radarr de B              = http://radarr-b:7878  (clé : Radarr B > Settings > General)
+#       Sonarr de B              = laisser l'exemple (pas de Sonarr dans ce banc)
+#   - Radarr B : http://<hôte>:7979, root folder /b/movies, indexeur et client SABnzbd comme dans le README.
+#
+# Stockage sur un autre disque : B_MEDIA=/mnt/autre/disque dans un fichier .env.
+# Partage réseau (CIFS/SMB) monté avec gid=1001 : PGID=1001 dans le .env.
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: availarr-agent
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: availarr-agent
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
+      TS_EXTRA_ARGS: --advertise-tags=tag:availarr-agent
+    volumes:
+      - ./test-b/tailscale:/var/lib/tailscale
+      - tailscale-run:/var/run/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    ports:
+      - "8789:8789"   # agent : page de configuration, puis Newznab/SABnzbd
+    networks:
+      default:
+        aliases: [availarr-agent]   # radarr-b joint l'agent par http://availarr-agent:8789
+
+  availarr-agent:
+    build: .
+    restart: unless-stopped
+    command: python -m availarr.agent
+    user: "${PUID:-1000}:${PGID:-1000}"
+    network_mode: service:tailscale
+    depends_on: [tailscale]
+    volumes:
+      - tailscale-run:/var/run/tailscale
+      - ./test-b/config:/config
+      - ./test-b/agent-data:/data          # base de l'agent : sur un disque local, jamais sur un partage réseau
+      - ${B_MEDIA:-./test-b/media}:/b      # même montage que radarr-b : import par hardlink, sans copie
+
+  radarr-b:
+    image: lscr.io/linuxserver/radarr:latest
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - ./test-b/radarr:/config
+      - ${B_MEDIA:-./test-b/media}:/b
+    ports:
+      - "7979:7878"
+
+volumes:
+  tailscale-run:
