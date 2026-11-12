@@ -13,7 +13,7 @@ AUTH = ("x", "change-me")
 
 
 def test_fmt_seed():
-    assert fmt_seed(2 * D + 4 * 3600, 3) == "2 j 04 h / 3 j ▓▓▓▓▓▓▓░░░"
+    assert fmt_seed(2 * D + 4 * 3600, 3) == "2 j 04 h / 3 j"
     assert fmt_seed(9 * D + 2 * 3600, 3) == "9 j 02 h ✅"
     assert fmt_seed(None, 3) == "—"
 
@@ -75,7 +75,8 @@ def test_unmapped_banner(env):
 
 def test_html_escapes_title(env):
     env[2]("<script>x</script>")
-    assert "<script>" not in env[3].get("/", auth=AUTH).text
+    t = env[3].get("/", auth=AUTH).text
+    assert "<script>x</script>" not in t and "&lt;script&gt;x" in t
 
 
 def test_removal_waiting_for_seed(env):
@@ -90,7 +91,8 @@ def test_already_there_and_qbit_error(env):
     j = mk(hashes=[], protected_units=["movie:603"])
     assert "Déjà chez toi" in c.get("/", auth=AUTH).text
     jobs.transfer[j.id] = (50, 200)
-    assert "Transfert 25%" in c.get("/", auth=AUTH).text
+    t = c.get("/fragment", auth=AUTH).text
+    assert "25 %" in t and "50 o / 200 o" in t and 'aria-valuenow="25"' in t
     qbit.seeding_seconds = lambda h: 1 / 0
     mk("Boom")
     assert c.get("/", auth=AUTH).status_code == 200
@@ -105,3 +107,13 @@ def test_pending_row_renders_when_library_down(env):
     jobs.status = down
     r = c.get("/", auth=AUTH)
     assert r.status_code == 200 and "Téléchargement …" in r.text
+
+
+def test_download_bar_and_filter_kept_on_action(env):
+    jobs, qbit, mk, c = env
+    j = mk(state="pending")
+    jobs.status = lambda job: {"progress": 0.42}
+    t = c.get("/fragment?f=active", auth=AUTH).text
+    assert "Téléchargement chez toi" in t and "42 %" in t and "Transfert vers B" in t
+    r = c.post(f"/jobs/{j.id}/keep?f=active", auth=AUTH)
+    assert r.headers["location"] == "/?f=active"
