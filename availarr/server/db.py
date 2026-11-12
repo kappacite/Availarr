@@ -10,6 +10,9 @@ _SCHEMA = """CREATE TABLE IF NOT EXISTS jobs (
  state TEXT, units TEXT, protected_units TEXT, added_by_tool INTEGER, hashes TEXT,
  created_at REAL, ready_at REAL, closed_at REAL, outcome TEXT, decision TEXT,
  deleted_at REAL, error TEXT)"""
+_SCHEMA_TRANSFERS = """CREATE TABLE IF NOT EXISTS transfers (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER, started_at REAL, seconds REAL, bytes INTEGER,
+ complete INTEGER)"""
 _JSON = ("units", "protected_units", "hashes")
 _OWNED = ("decision", "closed_at", "outcome", "deleted_at")  # written only through set(), never by update()
 
@@ -55,6 +58,7 @@ class JobStore:
     def __init__(self, path: str):
         self.path = path
         self._run(_SCHEMA)
+        self._run(_SCHEMA_TRANSFERS)
 
     def _run(self, sql: str, args=(), ids=None) -> list[sqlite3.Row]:
         with closing(sqlite3.connect(self.path)) as c:
@@ -94,6 +98,20 @@ class JobStore:
             raise ValueError(f"bad columns: {sorted(cols)}")
         v = {k: json.dumps(x) if k in _JSON else x for k, x in cols.items()}
         self._run(f"UPDATE jobs SET {','.join(f'{k}=:{k}' for k in v)} WHERE id=:id", {**v, "id": id})
+
+    def add_transfer(self, job_id: int, started_at: float, seconds: float, nbytes: int, complete: bool) -> None:
+        """One file served to B (or a piece of it, when the connection dropped and B resumed later)."""
+        self._run("INSERT INTO transfers (job_id,started_at,seconds,bytes,complete) VALUES (?,?,?,?,?)",
+                  (job_id, started_at, seconds, nbytes, int(complete)))
+
+    def transfers(self) -> list[dict]:
+        return [dict(r) for r in self._run("SELECT * FROM transfers ORDER BY started_at DESC, id DESC")]
+
+    def avg_rate(self, last: int = 20) -> float | None:
+        """Mean A -> B throughput (bytes/s) over the last transfers, None before the first one."""
+        r = self._run("SELECT SUM(bytes) b, SUM(seconds) s FROM (SELECT bytes, seconds FROM transfers "
+                      "WHERE seconds >= 1 AND bytes > 0 ORDER BY id DESC LIMIT ?)", (last,))[0]
+        return r["b"] / r["s"] if r["s"] else None
 
     def all(self) -> list[Job]:
         return [_row(r) for r in self._run("SELECT * FROM jobs ORDER BY id DESC")]

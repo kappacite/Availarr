@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 # Time left per SABnzbd job, shown by B's Radarr/Sonarr: A's torrent ETA + the transfer to B.
 ETA: dict[str, float] = {}
-# Last measured A -> B throughput (bytes/s). ponytail: in memory, 100 Mbit/s until the first transfer.
+# Fallback A -> B throughput (bytes/s) when the server has no history yet (it sends its average as "rate").
 RATE = [100e6 / 8]
 
 
@@ -113,7 +113,7 @@ def step(store: AgentStore, server: ServerClient) -> None:
                 job.phase = st["progress"]
                 torrent = st.get("eta")
                 # unknown torrent ETA (stalled, no torrent yet): at least show the transfer part
-                ETA[job.nzo_id] = (torrent or 0) + job.size / RATE[0]
+                ETA[job.nzo_id] = (torrent or 0) + job.size / (st.get("rate") or RATE[0])
             elif st["state"] == "ready":
                 _transfer(store, server, job, st["files"])
                 continue
@@ -150,8 +150,7 @@ def _transfer(store, server, job, files) -> None:
             if start[1] < 0:
                 start[:] = [now, have]
             elif now - start[0] >= 2 and have > start[1]:
-                RATE[0] = (have - start[1]) / (now - start[0])
-                ETA[job.nzo_id] = max(0, job.size - have) / RATE[0]
+                ETA[job.nzo_id] = max(0, job.size - have) * (now - start[0]) / (have - start[1])  # live rate
         if store.get(job.nzo_id).state != "transferring":
             raise Cancelled
         server.download(job.server_job_id, f["index"], Path(job.storage) / f["name"], f["size"], progress)

@@ -134,7 +134,7 @@ def test_refresh_unmapped_profile_fails_job(mk):
 def test_status_and_file_path(mk):
     j = mk(FakeLibrary([Unit("movie:603", True, True, GOOD)]))
     job = j.request(M, P, "T")
-    assert j.status(job) == {"state": "ready", "progress": 1.0, "eta": 0, "error": None,
+    assert j.status(job) == {"state": "ready", "progress": 1.0, "eta": 0, "rate": None, "error": None,
                              "files": [{"index": 0, "name": "Dune.mkv", "size": 9_000_000_000}]}
     assert j.file_path(job, 0) == ("/m/Dune.mkv", 9_000_000_000)
     with pytest.raises(IndexError):

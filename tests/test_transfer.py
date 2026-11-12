@@ -53,6 +53,8 @@ def test_download_resumes_from_part(env):
     env.server.download(env.jid, 0, dest, 1000, seen.append)
     assert dest.read_bytes() == DATA and not (env.dir / "Dune.mkv.part").exists()
     assert env.jobs.transfer[env.jid] == (1000, 1000) and seen[-1] == 1000
+    (t,) = env.jobs.store.transfers()
+    assert (t["job_id"], t["bytes"], t["complete"]) == (env.jid, 600, 1)  # only the resumed part went over
 
 
 def test_download_complete_part_416(env):
@@ -93,6 +95,9 @@ def test_step_pending_updates_phase(tmp_path):
     step(e.store, e.server)
     assert ETA.pop("n1") == 10.0
     RATE[0] = 100e6 / 8
+    e.jobs.store.add_transfer(99, 0, 10, 5000, True)  # server history: 500 B/s wins over the fallback
+    step(e.store, e.server)
+    assert ETA.pop("n1") == 2.0
 
 
 def test_step_ready_transfers_and_completes(env):

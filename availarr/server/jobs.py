@@ -119,7 +119,8 @@ class Jobs:
         elif job.state == "pending":
             progress = self.lib(job.item).progress(job.item)
         files = [{"index": i, "name": os.path.basename(f.path), "size": f.size} for i, f in enumerate(self._files(job))]
-        return {"state": job.state, "progress": progress, "eta": eta, "error": job.error, "files": files}
+        return {"state": job.state, "progress": progress, "eta": eta, "rate": self.store.avg_rate(),
+                "error": job.error, "files": files}
 
     def file_path(self, job: Job, index: int) -> tuple[str, int]:
         files = self._files(job)

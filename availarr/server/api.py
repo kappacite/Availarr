@@ -46,11 +46,18 @@ def iter_file(path: str, start: int, mbps: float, chunk: int = 1 << 20,
 
 
 def _stream(jobs: Jobs, id: int, path: str, start: int, size: int, mbps: float, chunk: int = 1 << 20):
-    pos = start
-    for data in iter_file(path, start, mbps, chunk):
-        pos += len(data)
-        yield data
-        jobs.transfer[id] = (max(pos, jobs.transfer.get(id, (0, 0))[0]), size)
+    pos, wall, t0 = start, time.time(), time.monotonic()
+    try:
+        for data in iter_file(path, start, mbps, chunk):
+            pos += len(data)
+            yield data
+            jobs.transfer[id] = (max(pos, jobs.transfer.get(id, (0, 0))[0]), size)
+    finally:  # also when B drops the connection: the bytes that went through still measure the link
+        if pos > start:
+            try:
+                jobs.store.add_transfer(id, wall, time.monotonic() - t0, pos - start, pos >= size)
+            except Exception as e:  # noqa: BLE001 - stats must never break a transfer
+                log.warning("job %s: transfer not recorded: %s", id, e)
 
 
 def _item(key: str) -> Item:
