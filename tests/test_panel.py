@@ -87,8 +87,10 @@ def test_removal_waiting_for_seed(env):
 
 def test_already_there_and_qbit_error(env):
     jobs, qbit, mk, c = env
-    mk(hashes=[], protected_units=["movie:603"])
+    j = mk(hashes=[], protected_units=["movie:603"])
     assert "Déjà chez toi" in c.get("/", auth=AUTH).text
+    jobs.transfer[j.id] = (50, 200)
+    assert "Transfert 25%" in c.get("/", auth=AUTH).text
     qbit.seeding_seconds = lambda h: 1 / 0
     mk("Boom")
     assert c.get("/", auth=AUTH).status_code == 200

@@ -50,8 +50,6 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
     app = FastAPI(dependencies=[Depends(auth)])
 
     def state(job) -> str:
-        if job.state == "ready" and fully_protected(job) and not job.hashes:
-            return "Déjà chez toi"
         if job.outcome == "delivered":
             return "Livré ✅"
         if job.outcome == "cancelled":
@@ -65,7 +63,9 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 return "Téléchargement …"
         if job.state == "ready":
             t = jobs.transfer.get(job.id)
-            return f"Transfert {round(100 * t[0] / t[1]) if t[1] else 0}%" if t else "Prêt"
+            if t:
+                return f"Transfert {round(100 * t[0] / t[1]) if t[1] else 0}%"
+            return "Déjà chez toi" if fully_protected(job) and not job.hashes else "Prêt"
         return job.state
 
     def seed(job) -> tuple[str, bool]:
@@ -112,7 +112,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         banner = (f'<p class="warn">Profils de B sans correspondance : '
                   f'{escape(", ".join(sorted(jobs.unmapped)))}</p>') if jobs.unmapped else ""
         links = " ".join(f'<a href="/?f={k}">{v}</a>' for k, v in FILTERS.items())
-        return (f'<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Availarr</title><style>'
+        return (f'<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta http-equiv="refresh" content="15"><title>Availarr</title><style>'
                 "body{font-family:sans-serif;margin:2em}table{border-collapse:collapse;width:100%}"
                 "td,th{border-bottom:1px solid #ccc;padding:.4em;text-align:left}form{display:inline}"
                 ".warn{background:#fe9;padding:.5em}</style></head><body><h1>Availarr</h1>"
