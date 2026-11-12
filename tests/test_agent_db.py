@@ -15,6 +15,8 @@ def test_agent_job_percentage():
     assert _job().percentage == 25
     assert _job(state="transferring", done=500).percentage == 75
     assert _job(state="completed").percentage == 100
+    assert _job(state="transferring", done=5000).percentage == 100  # more bytes than announced: capped
+    assert _job(phase=1.7).percentage == 50
 
 
 def test_agent_store_roundtrip_and_active(tmp_path):

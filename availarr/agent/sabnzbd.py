@@ -99,7 +99,7 @@ def router(cfg, store, server) -> APIRouter:
             slots.append({
                 "nzo_id": j.nzo_id, "filename": j.name, "cat": j.cat,
                 "status": "Downloading" if j.state == "transferring" else "Queued",
-                "mb": "%.1f" % (j.size / MB), "mbleft": "%.1f" % (j.size * (1 - pct / 100) / MB),
+                "mb": "%.1f" % (j.size / MB), "mbleft": "%.1f" % max(0.0, j.size * (1 - pct / 100) / MB),
                 "percentage": str(pct), "timeleft": _hms(ETA.get(j.nzo_id, 0)), "priority": "Normal",
             })
         return {"queue": {"paused": False, "slots": slots}}

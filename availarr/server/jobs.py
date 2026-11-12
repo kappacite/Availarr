@@ -12,6 +12,14 @@ from availarr.server.quality import Requirement, file_tags, satisfies
 log = logging.getLogger(__name__)
 
 
+def _disk_size(f) -> int:
+    """The size the API will actually serve; the arr's recorded size can lag behind the file on disk."""
+    try:
+        return os.stat(f.path).st_size
+    except OSError:
+        return f.size
+
+
 class Jobs:
     def __init__(self, store: JobStore, radarr: Library, sonarr: Library, cfg: ServerConfig, clock=time.time,
                  qbit=None):
@@ -118,7 +126,8 @@ class Jobs:
             eta = max(etas.values()) if etas and None not in etas.values() else None
         elif job.state == "pending":
             progress = self.lib(job.item).progress(job.item)
-        files = [{"index": i, "name": os.path.basename(f.path), "size": f.size} for i, f in enumerate(self._files(job))]
+        files = [{"index": i, "name": os.path.basename(f.path), "size": _disk_size(f)}
+                 for i, f in enumerate(self._files(job))]
         return {"state": job.state, "progress": progress, "eta": eta, "rate": self.store.avg_rate(),
                 "error": job.error, "files": files}
 

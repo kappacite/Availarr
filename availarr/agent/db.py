@@ -27,9 +27,9 @@ class AgentJob:
     @property
     def percentage(self) -> int:
         if self.state == "queued":
-            return int(50 * self.phase)
+            return int(50 * min(1.0, max(0.0, self.phase)))
         if self.state == "transferring":
-            return 50 + int(50 * self.done / self.size) if self.size else 50
+            return 50 + int(50 * min(1.0, self.done / self.size)) if self.size else 50
         return 100 if self.state == "completed" else 0
 
 
