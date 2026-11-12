@@ -1,20 +1,22 @@
 # Banc d'essai côté B : Tailscale + agent + un Radarr « de B » vierge, sur une seule machine.
+# Marche sous Linux et sous Windows (Docker Desktop) : les bases SQLite et l'état Tailscale sont dans des volumes
+# Docker, seuls la config de l'agent et les films sont dans des dossiers du projet.
 #
-#   mkdir -p test-b/{config,agent-data,radarr,media/downloads/complete,media/movies}
-#   sudo chown -R ${PUID:-1000}:${PGID:-1000} test-b
 #   docker compose -f compose.agent-test.yml up -d --build
+#   (Linux seulement, avant : mkdir -p test-b/config test-b/media && sudo chown -R 1000:1000 test-b)
 #
 # Puis :
-#   - page de configuration de l'agent : http://<hôte>:8789  (code : docker compose -f compose.agent-test.yml logs availarr-agent)
-#       Adresse du server        = celle affichée par le server de A (http://100.x.y.z:8787)
-#       Adresse de l'agent       = http://availarr-agent:8789
+#   - page de configuration de l'agent : http://localhost:8789
+#     code : docker compose -f compose.agent-test.yml logs availarr-agent
+#       Tailscale                 = ouvrir le lien affiché et accepter avec le compte Tailscale de A
+#       Adresse du server         = celle affichée par le server de A (http://100.x.y.z:8787)
+#       Adresse de l'agent        = http://availarr-agent:8789
 #       Dossier de téléchargement = /b/downloads/complete
-#       Radarr de B              = http://radarr-b:7878  (clé : Radarr B > Settings > General)
-#       Sonarr de B              = laisser l'exemple (pas de Sonarr dans ce banc)
-#   - Radarr B : http://<hôte>:7979, root folder /b/movies, indexeur et client SABnzbd comme dans le README.
+#       Radarr de B               = http://radarr-b:7878  (clé : Radarr B > Settings > General)
+#       Sonarr de B               = laisser l'exemple (pas de Sonarr dans ce banc)
+#   - Radarr B : http://localhost:7979, root folder /b/movies, indexeur et client SABnzbd comme dans le README.
 #
-# Stockage sur un autre disque : B_MEDIA=/mnt/autre/disque dans un fichier .env.
-# Partage réseau (CIFS/SMB) monté avec gid=1001 : PGID=1001 dans le .env.
+# Options dans un fichier .env : B_MEDIA=<dossier des films>, PGID=1001 (partage SMB), TS_AUTHKEY=<clé>.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -28,7 +30,7 @@ services:
       TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
       TS_EXTRA_ARGS: --advertise-tags=tag:availarr-agent
     volumes:
-      - ./test-b/tailscale:/var/lib/tailscale
+      - tailscale-state:/var/lib/tailscale
       - tailscale-run:/var/run/tailscale
     devices:
       - /dev/net/tun:/dev/net/tun
@@ -48,9 +50,9 @@ services:
     depends_on: [tailscale]
     volumes:
       - tailscale-run:/var/run/tailscale
-      - ./test-b/config:/config
-      - ./test-b/agent-data:/data          # base de l'agent : sur un disque local, jamais sur un partage réseau
-      - ${B_MEDIA:-./test-b/media}:/b      # même montage que radarr-b : import par hardlink, sans copie
+      - ./test-b/config:/config            # agent.toml, écrit par la page de configuration
+      - agent-data:/data                   # base SQLite de l'agent
+      - ${B_MEDIA:-./test-b/media}:/b      # même montage que radarr-b
 
   radarr-b:
     image: lscr.io/linuxserver/radarr:latest
@@ -60,10 +62,13 @@ services:
       PGID: ${PGID:-1000}
       TZ: ${TZ:-Europe/Paris}
     volumes:
-      - ./test-b/radarr:/config
+      - radarr-b-config:/config            # base SQLite de Radarr
       - ${B_MEDIA:-./test-b/media}:/b
     ports:
       - "7979:7878"
 
 volumes:
   tailscale-run:
+  tailscale-state:
+  agent-data:
+  radarr-b-config:
