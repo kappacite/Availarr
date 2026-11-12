@@ -3,7 +3,9 @@
 # Docker, seuls la config de l'agent et les films sont dans des dossiers du projet.
 #
 #   docker compose -f compose.agent-test.yml up -d --build
-#   (Linux seulement, avant : mkdir -p test-b/config test-b/media && sudo chown -R 1000:1000 test-b)
+#   Avant : créer les dossiers des films
+#     Windows : mkdir test-b\media\movies, test-b\media\downloads\complete
+#     Linux   : mkdir -p test-b/config test-b/media/movies test-b/media/downloads/complete && sudo chown -R 1000:1000 test-b
 #
 # Puis :
 #   - page de configuration de l'agent : http://localhost:8789
