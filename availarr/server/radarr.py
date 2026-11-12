@@ -44,7 +44,7 @@ class Radarr:
         info = None
         if f:
             q = f["quality"]["quality"]
-            info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"])
+            info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"], f.get("sceneName"))
         return [Unit(key, True, m["monitored"], info)]
 
     def title(self, item: Item) -> tuple[str, int | None]:

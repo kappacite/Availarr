@@ -58,7 +58,7 @@ class Sonarr:
             info = None
             if f:
                 q = f["quality"]["quality"]
-                info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"])
+                info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"], f.get("sceneName"))
             out.append(Unit(self._key(item, e), True, e["monitored"], info))
         return out
 

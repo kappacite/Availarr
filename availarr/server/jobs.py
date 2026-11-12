@@ -7,7 +7,7 @@ from availarr.common import Item, release_title as make_title
 from availarr.server.config import ServerConfig
 from availarr.server.db import Job, JobStore
 from availarr.server.library import Library
-from availarr.server.quality import Requirement, file_tags, satisfies
+from availarr.server.quality import Requirement, file_tags, original_title, satisfies
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +52,8 @@ class Jobs:
             return None
         name, year = lib.title(item)
         if all(satisfies(u.file, req) for u in units):
-            return {"title": make_title(name, year, item, file_tags(units[0].file)),
+            own = original_title(units[0].file, req) if len(units) == 1 else None  # a season pack has many names
+            return {"title": own or make_title(name, year, item, file_tags(units[0].file)),
                     "size": sum(u.file.size for u in units)}
         gb = self.cfg.movie_gb if item.kind == "movie" else self.cfg.episode_gb * len(units)
         return {"title": make_title(name, year, item, req.announce), "size": int(gb * 10**9)}
