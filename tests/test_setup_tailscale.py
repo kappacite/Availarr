@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from availarr import setup
 from availarr.agent.config import load_agent_config
-from availarr.setup import create_setup, tailscale_view
+from availarr.setup import create_setup, netns_lost, tailscale_view
 
 LOGIN = {"BackendState": "NeedsLogin", "AuthURL": "https://login.tailscale.com/a/abc"}
 
@@ -26,3 +26,10 @@ def test_endpoint_needs_code(tmp_path, monkeypatch):
     assert "abc" not in c.get("/tailscale", params={"code": "nope"}).text
     assert "login.tailscale.com/a/abc" in c.get("/tailscale", params={"code": "abc123"}).text
     assert 'id="ts"' in c.get("/").text
+
+
+def test_netns_lost():
+    assert netns_lost({"BackendState": "Running"}, None)
+    assert not netns_lost({"BackendState": "Running"}, "100.64.1.2")
+    assert not netns_lost({"BackendState": "NeedsLogin"}, None)
+    assert not netns_lost(None, None)  # no sidecar at all

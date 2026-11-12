@@ -7,6 +7,8 @@ import re
 import secrets
 import socket
 import tempfile
+import threading
+import time
 from html import escape
 
 import httpx
@@ -96,6 +98,24 @@ def tailscale_status(sock: str = TS_SOCKET) -> dict | None:
             return r.json()
     except (httpx.HTTPError, ValueError):
         return {"BackendState": "Unreachable"}
+
+
+def netns_lost(st: dict | None, ip: str | None) -> bool:
+    """Tailscale runs but this container has no tailnet address: the sidecar restarted and left us on its old network."""
+    return bool(st) and st.get("BackendState") == "Running" and ip is None
+
+
+def watch_tailscale(every: float = 30) -> None:
+    """Exit when the Tailscale sidecar's network is lost, so Docker restarts us on the sidecar's current one."""
+    def loop():
+        misses = 0
+        while True:
+            time.sleep(every)
+            misses = misses + 1 if netns_lost(tailscale_status(), tailscale_ip()) else 0
+            if misses >= 2:
+                logging.error("Réseau Tailscale perdu (le conteneur tailscale a redémarré) : arrêt pour être relancé")
+                os._exit(1)
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def tailscale_view(st: dict | None, kind: str, show_url: bool) -> str:

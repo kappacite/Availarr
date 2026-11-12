@@ -14,7 +14,7 @@ from availarr.server.qbit import QBit
 from availarr.server.radarr import Radarr
 from availarr.server.retention import tick
 from availarr.server.sonarr import Sonarr
-from availarr.setup import run_setup, tailscale_ip
+from availarr.setup import run_setup, tailscale_ip, watch_tailscale
 
 
 def build(cfg):
@@ -40,6 +40,7 @@ def main():
     if ts := tailscale_ip():
         logging.warning("Adresse du server pour l'agent (Tailscale) : http://%s:%s", ts, cfg.api_port)
     api, panel, retention_once = build(cfg)
+    watch_tailscale()
 
     def retention_loop():
         while True:

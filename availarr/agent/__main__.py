@@ -11,7 +11,7 @@ from availarr.agent.b_arr import BArr
 from availarr.agent.config import load_agent_config
 from availarr.agent.db import AgentStore
 from availarr.agent.transfer import ServerClient, step
-from availarr.setup import run_setup
+from availarr.setup import run_setup, watch_tailscale
 
 
 def build(cfg):
@@ -38,6 +38,7 @@ def main():
         run_setup("agent", path, load_agent_config, port=8789)
     cfg = load_agent_config(path)
     app, step_once = build(cfg)
+    watch_tailscale()
 
     def loop():
         while True:
