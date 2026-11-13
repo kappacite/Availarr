@@ -1,7 +1,8 @@
-# Côté A : API (8787, joignable seulement par Tailscale) + panel (8788, local). Le panel ne doit PAS être exposé à B.
+# Côté envoyeur : API (8787, joignable seulement par Tailscale) + panel (8788, tout le réseau local).
+# Le panel ne doit PAS être exposé au receveur (ne pas rediriger 8788 sur la box).
 #
 # Tailscale par défaut : le conteneur "tailscale" porte le réseau, le server tourne dans le même espace réseau.
-# Premier démarrage : la page de configuration (http://127.0.0.1:8788) affiche « Connecter à Tailscale ».
+# Premier démarrage : la page de configuration (http://<hôte>:8788) affiche « Connecter à Tailscale ».
 # Optionnel : TS_AUTHKEY=... dans un fichier .env à côté de ce compose, pour se connecter sans clic.
 # L'identité Tailscale est ensuite gardée dans ./tailscale.
 services:
@@ -24,16 +25,16 @@ services:
       - /dev/net/tun:/dev/net/tun
     cap_add: [NET_ADMIN, NET_RAW]
     ports:
-      # Panel : local uniquement. Pour l'ouvrir sur le LAN, remplacer 127.0.0.1 par l'IP LAN de A
-      # (ex. "192.168.1.10:8788:8788"). Ne jamais l'exposer à B.
+      # Panel : joignable depuis tout le réseau local (protégé par admin_password). Ne jamais l'exposer au receveur.
+      # Pour le limiter à cette machine : "127.0.0.1:8788:8788".
       # L'API 8787 n'est volontairement pas publiée : l'agent la joint par Tailscale.
-      - "127.0.0.1:8788:8788"
+      - "8788:8788"
       # Tailscale (WireGuard) : rediriger UDP 21641 de la box vers cette machine. Sans ça, le trafic passe par
       # les relais DERP de Tailscale, limités à quelques Mbit/s. Ne répond qu'aux machines du tailnet.
       - "21641:21641/udp"
 
   availarr-server:
-    build: .
+    image: ghcr.io/kappacite/availarr-server:latest
     restart: unless-stopped
     network_mode: service:tailscale
     depends_on: [tailscale]
@@ -41,7 +42,7 @@ services:
       - tailscale-run:/var/run/tailscale
       - ./config:/config   # modifiable : la page de première configuration y écrit server.toml
       - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
-      # Médias de A, au MÊME chemin que dans le Radarr/Sonarr de A
+      # Médias de l'envoyeur, au MÊME chemin que dans son Radarr/Sonarr
       - /media:/media:ro
 
 volumes:

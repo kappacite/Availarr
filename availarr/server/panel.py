@@ -18,6 +18,7 @@ FILTERS = {"all": "Tout", "active": "En cours", "pending": "À décider", "kept"
 ACTIONS = {"keep": "keep", "delete": "delete", "cancel": "none"}
 POLL_MS = 4000  # ponytail: each poll asks A's Radarr/Sonarr queue per downloading job; fine for a handful
 STATS_POLL_MS = 15000
+AGENT_ONLINE_S = 120  # the agent pings every poll_seconds (30 s by default)
 
 
 def fmt_seed(seconds: int | None, seed_days: float) -> str:
@@ -173,11 +174,11 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         return bar("dl", label, None, "—")
 
     def transfer_bar(job) -> str:
-        label = "Transfert vers B"
+        label = "Transfert vers le receveur"
         if job.outcome == "delivered":
             return bar("tx", label, 100, "Livré ✅", done=True)
         if job.outcome == "cancelled":
-            return bar("tx", label, None, "Annulé chez B")
+            return bar("tx", label, None, "Annulé chez le receveur")
         t = jobs.transfer.get(job.id)
         if t and job.state == "ready":
             pos, total = t
@@ -188,7 +189,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 extra += f", {fmt_mo(r)}, reste {fmt_eta((total - pos) / r)}"
             return bar("tx", label, pct, f"{round(pct)} %", extra, running=pos < total)
         if job.state == "ready":
-            return bar("tx", label, 0, "En attente de B")
+            return bar("tx", label, 0, "En attente du receveur")
         if job.state == "pending":
             return bar("tx", label, 0, "Après le téléchargement")
         return bar("tx", label, None, "—")
@@ -242,7 +243,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         if job.outcome == "delivered":
             return '<span class="pill p-ok">Livré</span>'
         if job.outcome == "cancelled":
-            return '<span class="pill">Annulé chez B</span>'
+            return '<span class="pill">Annulé chez le receveur</span>'
         if job.state == "pending":
             return '<span class="pill p-dl">Téléchargement</span>'
         if jobs.transfer.get(job.id):
@@ -271,19 +272,26 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         tx = sum(active(j) and j.state == "ready" and bool(jobs.transfer.get(j.id)) for j in all_jobs)
         todo = sum(show(j, "pending") for j in all_jobs)
         if not (dl or tx or todo):
-            return ("Rien en cours. Les demandes de B apparaissent ici dès que son Radarr ou son Sonarr "
+            return ("Rien en cours. Les demandes du receveur apparaissent ici dès que son Radarr ou son Sonarr "
                     "récupère une release Availarr.")
         parts = [p for p in (f"{dl} en téléchargement chez toi" if dl else "",
-                             f"{tx} en transfert vers B" if tx else "") if p]
+                             f"{tx} en transfert vers le receveur" if tx else "") if p]
         txt = (", ".join(parts) + ". ") if parts else ""
         if todo:
             txt += f"{plural(todo, 'demande')} {'attendent' if todo > 1 else 'attend'} ta décision."
         return txt
 
+    def agent_status(now: float) -> str:
+        seen = jobs.agent_seen
+        if seen is not None and now - seen < AGENT_ONLINE_S:
+            return '<span class="pill p-ok">Agent en ligne</span>'
+        txt = "jamais vu depuis le démarrage" if seen is None else f"vu {fmt_ago(now - seen)}"
+        return f'<span class="pill p-bad">Agent hors ligne, {txt}</span>'
+
     def requests_fragment(f: str) -> str:
         f = f if f in FILTERS else "all"
         now, all_jobs = clock(), sorted(jobs.store.all(), key=lambda j: j.created_at, reverse=True)
-        banner = (f'<p class="warn">Profils de B sans correspondance dans [profiles] : '
+        banner = (f'<p class="warn">Profils du receveur sans correspondance dans [profiles] : '
                   f'{escape(", ".join(sorted(jobs.unmapped)))}</p>') if jobs.unmapped else ""
         seg = "".join(f'<a href="/?f={k}"{" class=on" if k == f else ""}>{v}'
                       f"<b>{sum(show(j, k) for j in all_jobs)}</b></a>" for k, v in FILTERS.items())
@@ -292,7 +300,8 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                  '<span>Seed et suppression</span><span></span></div>'
                  + (f'<ul class="jobs">{rows}</ul>' if rows else '<p class="empty">Aucune demande dans ce filtre.</p>')
                  + "</div>")
-        return (f'<div class="head"><div><h2>Demandes</h2><p class="sub">{escape(summary(all_jobs))}</p></div>'
+        return (f'<div class="head"><div><h2>Demandes</h2><p class="sub">{escape(summary(all_jobs))}</p>'
+                f'<div class="line">{agent_status(now)}</div></div>'
                 f'<nav class="seg" aria-label="Filtres">{seg}</nav></div>{banner}{table}')
 
     def stats_fragment() -> str:
@@ -304,7 +313,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
 
         def fig(label: str, value: str, note: str) -> str:
             return f'<div class="fig"><span>{label}</span><b>{escape(value)}</b><small>{escape(note)}</small></div>'
-        figs = (fig("Livrés à B", str(st["delivered"]), kinds or "aucune livraison pour l'instant")
+        figs = (fig("Livrés au receveur", str(st["delivered"]), kinds or "aucune livraison pour l'instant")
                 + fig("Volume envoyé", fmt_bytes(st["sent"]), plural(st["transfers"], "envoi"))
                 + fig("Débit moyen", fmt_mo(st["rate_mean"]),
                       fmt_mbit(st["rate_mean"]) if st["rate_mean"] else "pas encore de mesure")
@@ -318,7 +327,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         chart = (f'<div class="card block"><h3>Volume envoyé par jour</h3>'
                  f'<p class="sub" style="margin-top:-8px">{stats.DAYS} derniers jours. '
                  f"Survole une barre pour voir le détail.</p>"
-                 f'<div class="chart" role="img" aria-label="Volume envoyé vers B par jour, sur {stats.DAYS} jours">'
+                 f'<div class="chart" role="img" aria-label="Volume envoyé au receveur par jour, sur {stats.DAYS} jours">'
                  f'<div class="grid">{fmt_bytes(peak) if peak else ""}</div>{cols}</div>'
                  f'<div class="axis"><span>{time.strftime("%d/%m", time.localtime(st["days"][0][0]))}</span>'
                  f"<span>aujourd'hui</span></div></div>")
@@ -331,11 +340,11 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return f"{fmt_mo(bps)} ({fmt_mbit(bps)})" if bps else "—"
         three = ('<div class="three">'
                  + facts("Chez toi", [("Demandes reçues", str(st["requests"])),
-                                      ("Téléchargées pour B", str(st["downloaded"])),
+                                      ("Téléchargées pour le receveur", str(st["downloaded"])),
                                       ("Servies depuis ta bibliothèque", str(st["from_library"])),
                                       ("Temps moyen de téléchargement", fmt_dur(st["dl_mean"])),
                                       ("Échecs", str(st["failed"]))])
-                 + facts("Envois vers B", [("Débit moyen", both(st["rate_mean"])),
+                 + facts("Envois au receveur", [("Débit moyen", both(st["rate_mean"])),
                                            ("Meilleur débit", both(st["rate_best"])),
                                            ("Dernier envoi", both(st["rate_last"])),
                                            ("Envois interrompus", str(st["interrupted"])),
@@ -358,10 +367,10 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         table = ('<div class="card block"><h3>Derniers envois</h3>'
                  + ('<table><tr><th>Titre</th><th>Début</th><th class="r">Taille</th><th class="r">Durée</th>'
                     f'<th class="r">Débit</th><th>État</th></tr>{recent}</table>' if recent else
-                    '<p class="sub">Aucun envoi pour l\'instant. Le premier transfert vers B apparaîtra ici.</p>')
+                    '<p class="sub">Aucun envoi pour l\'instant. Le premier transfert vers le receveur apparaîtra ici.</p>')
                  + "</div>")
-        return ('<div class="head"><div><h2>Statistiques</h2><p class="sub">Ce que tu as téléchargé et envoyé pour B. '
-                "Le débit moyen des derniers envois sert aussi à estimer le temps restant affiché chez B.</p>"
+        return ('<div class="head"><div><h2>Statistiques</h2><p class="sub">Ce que tu as téléchargé et envoyé pour le receveur. '
+                "Le débit moyen des derniers envois sert aussi à estimer le temps restant affiché chez le receveur.</p>"
                 f'</div></div><div class="card figs">{figs}</div>{chart}{three}{table}')
 
     def page(tab: str, inner: str, src: str, every: int) -> str:

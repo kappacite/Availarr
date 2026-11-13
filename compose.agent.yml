@@ -1,8 +1,8 @@
-# Côté B : indexeur Newznab + client SABnzbd factices pour Radarr/Sonarr de B.
+# Côté receveur : indexeur Newznab + client SABnzbd factices pour son Radarr/Sonarr.
 #
-# Tailscale par défaut : le conteneur "tailscale" relie l'agent au server de A, rien d'autre n'est installé chez B.
+# Tailscale par défaut : le conteneur "tailscale" relie l'agent au server de l'envoyeur, rien d'autre à installer.
 # Premier démarrage : la page de configuration (http://<hôte>:8789) affiche un lien Tailscale à envoyer
-# à A, qui l'accepte avec son compte. Optionnel : TS_AUTHKEY=... (clé fournie par A) dans un fichier .env.
+# à l'envoyeur, qui l'accepte avec son compte. Optionnel : TS_AUTHKEY=... (clé fournie par l'envoyeur) dans .env.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -15,6 +15,7 @@ services:
       TS_USERSPACE: "false"
       TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
       TS_EXTRA_ARGS: --advertise-tags=tag:availarr-agent
+      TS_TAILSCALED_EXTRA_ARGS: --port=21641   # port UDP fixe : aide la liaison directe au lieu du relais
     volumes:
       - ./tailscale:/var/lib/tailscale
       - tailscale-run:/var/run/tailscale
@@ -22,22 +23,22 @@ services:
       - /dev/net/tun:/dev/net/tun
     cap_add: [NET_ADMIN, NET_RAW]
     ports:
-      - "8789:8789"   # pour le Radarr/Sonarr de B (et la page de première configuration)
+      - "8789:8789"   # pour le Radarr/Sonarr du receveur (et la page de première configuration), tout le réseau local
+      - "21641:21641/udp"   # Tailscale (WireGuard), optionnel à rediriger sur la box
     networks:
       default:
         aliases: [availarr-agent]   # Radarr/Sonarr sur ce même réseau Docker joignent http://availarr-agent:8789
 
   availarr-agent:
-    build: .
+    image: ghcr.io/kappacite/availarr-agent:latest
     restart: unless-stopped
-    command: python -m availarr.agent
     network_mode: service:tailscale
     depends_on: [tailscale]
     volumes:
       - tailscale-run:/var/run/tailscale
       - ./config:/config   # modifiable : la page de première configuration y écrit agent.toml
       - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
-      # Dossier de téléchargements de B (complete_dir de agent.toml) ; sudo chown 1000:1000 sur ce dossier
+      # Dossier de téléchargements du receveur (complete_dir de agent.toml) ; sudo chown 1000:1000 sur ce dossier
       - /downloads:/downloads
 
 volumes:

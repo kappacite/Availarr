@@ -31,6 +31,9 @@ class ServerClient:
         r.raise_for_status()
         return r
 
+    def ping(self) -> None:
+        self._call("GET", "/v1/ping")
+
     def lookup(self, item: Item | str, b_profile: str) -> dict | None:
         body = {"item": _key(item), "b_profile": b_profile}
         return self._call("POST", "/v1/lookup", json=body).json()["release"]
@@ -118,7 +121,7 @@ def step(store: AgentStore, server: ServerClient) -> None:
                 _transfer(store, server, job, st["files"])
                 continue
             else:  # "retried" or anything unknown: A dropped this job, B must re-grab
-                job.state, job.fail_message = "failed", "Relancé chez A"
+                job.state, job.fail_message = "failed", "Relancé chez l'envoyeur"
             _save(store, job)
         except Cancelled:
             pass

@@ -24,6 +24,7 @@ def build(cfg):
 
     def step_once():
         try:
+            server.ping()  # heartbeat: the server's panel shows the agent online even when idle
             step(store, server)
         except Exception:
             logging.exception("agent step failed")

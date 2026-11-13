@@ -182,3 +182,15 @@ def test_keep_set_during_second_check_is_honoured(env):
     q = FlipQbit({})
     assert tick(jobs, q, 100 * D) == [] and lib.removed == [] and q.deleted == []
     assert q.calls == 2 and jobs.store.get(j.id).deleted_at is None
+
+
+def test_requested_again_newest_job_decides(env):
+    jobs, lib, qbit, mk = env
+    old = mk()
+    new = mk(closed_at=None)
+    assert tick(jobs, qbit, 30 * D) == [] and lib.removed == []  # old one expired, but B asked again
+    jobs.store.set(new.id, closed_at=30 * D)
+    assert tick(jobs, qbit, 37 * D) == [new.id]
+    assert lib.removed == [(M, ["movie:603"], True)]
+    assert jobs.store.get(old.id).deleted_at == 37 * D
+    assert tick(jobs, qbit, 40 * D) == []

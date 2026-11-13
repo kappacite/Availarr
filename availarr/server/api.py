@@ -71,6 +71,7 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
     def auth(authorization: str = Header("")):
         if not secrets.compare_digest(authorization.encode(), f"Bearer {cfg.token}".encode()):
             raise HTTPException(401, "bad token")
+        jobs.agent_seen = time.time()  # the panel shows whether the agent is online
 
     app = FastAPI(dependencies=[Depends(auth)])
 

@@ -64,7 +64,7 @@ def test_lookup_blocked_after_failure(mk, clock):
     job = j.request(M, P, "T")
     clock.t = 7 * 86400
     job = j.refresh(job)
-    assert job.state == "failed" and job.error == "Introuvable chez A après 7 j"
+    assert job.state == "failed" and job.error == "Introuvable chez l'envoyeur après 7 j"
     assert j.lookup(M, P) is None
     job.state = "retried"
     j.store.update(job)
@@ -99,11 +99,13 @@ def test_request_satisfied_is_ready_immediately(mk):
     assert not job.added_by_tool
 
 
-def test_request_reuses_active_job(mk):
+def test_request_again_is_a_new_entry_with_the_same_state(mk):
     j = mk(FakeLibrary([NONE]))
     a = j.request(M, P, "T")
+    j.store.set(a.id, state="ready", hashes=["h"], decision="keep")
     b = j.request(M, P, "T")
-    assert a.id == b.id and len(j.lib(M).ensure_calls) == 1
+    assert a.id != b.id and len(j.lib(M).ensure_calls) == 1
+    assert (b.state, b.hashes, b.decision, b.added_by_tool) == ("ready", ["h"], "keep", a.added_by_tool)
 
 
 def test_refresh_ready_records_hashes_and_units(mk, clock):
@@ -128,7 +130,7 @@ def test_refresh_unmapped_profile_fails_job(mk):
     job = j.request(M, P, "T")
     j.cfg.profiles.clear()
     job = j.refresh(job)
-    assert job.state == "failed" and job.error == "Profil de B sans correspondance : HD-1080p FR"
+    assert job.state == "failed" and job.error == "Profil du receveur sans correspondance : HD-1080p FR"
 
 
 def test_status_and_file_path(mk):
@@ -151,15 +153,14 @@ def test_status_pending_progress_and_close(mk, clock):
     assert (got.outcome, got.closed_at) == ("cancelled", 9)
 
 
-def test_reuse_resets_close_and_decision(mk, clock):
+def test_new_entry_starts_open_and_undecided(mk, clock):
     j = mk(FakeLibrary([NONE]))
     a = j.request(M, P, "T")
     clock.t = 9
     j.close(a, "cancelled")
     j.store.set(a.id, decision="delete")
     b = j.request(M, P, "T")
-    got = j.store.get(a.id)
-    assert b.id == a.id and (got.closed_at, got.outcome, got.decision) == (None, None, "none")
+    assert b.id != a.id and (b.closed_at, b.outcome, b.decision) == (None, None, "none")
 
 
 def test_deleted_job_reports_failed_and_no_files(mk):
@@ -167,7 +168,7 @@ def test_deleted_job_reports_failed_and_no_files(mk):
     job = j.request(M, P, "T")
     j.store.set(job.id, deleted_at=5.0)
     job = j.store.get(job.id)
-    assert j.status(job) == {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
+    assert j.status(job) == {"state": "failed", "progress": 0.0, "error": "Supprimé chez l'envoyeur", "files": []}
     with pytest.raises(IndexError):
         j.file_path(job, 0)
 

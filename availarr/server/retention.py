@@ -46,9 +46,12 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
             job = jobs.store.get(snap.id)  # the panel may have decided since the snapshot
             if not _eligible(job, qbit, now, jobs.cfg.keep_days, jobs.cfg.seed_days):
                 continue
+            if any(o.id > job.id and o.item == job.item and o.deleted_at is None for o in all_jobs):
+                continue  # requested again since: the newest job decides
             # a partly protected entry must never be dropped: Sonarr would delete the protected episodes too
             drop = job.added_by_tool and not job.protected_units and not any(
-                o.id != job.id and o.deleted_at is None and _shares_entry(job, o) for o in all_jobs)
+                o.id != job.id and o.deleted_at is None and _shares_entry(job, o)
+                and not (o.item == job.item and o.id < job.id) for o in all_jobs)
             keys = [u for u in job.units if u not in job.protected_units]
             job = jobs.store.get(job.id)
             if not _eligible(job, qbit, now, jobs.cfg.keep_days, jobs.cfg.seed_days):
@@ -59,7 +62,9 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
             jobs.lib(job.item).remove(job.item, keys, drop)
             for h in job.hashes:
                 qbit.delete(h)
-            jobs.store.set(job.id, deleted_at=now)
+            for o in all_jobs:  # older entries of the same request share these files: gone with them
+                if o.id <= job.id and o.item == job.item and o.deleted_at is None:
+                    jobs.store.set(o.id, deleted_at=now)
             done.append(job.id)
         except Exception:
             log.exception("retention: job %s failed", snap.id)

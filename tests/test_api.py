@@ -149,4 +149,4 @@ def test_deleted_job_file_410_and_status_failed(env, jid):
     jobs.store.set(jid, deleted_at=1.0)
     assert c.get(f"/v1/requests/{jid}/files/0", headers=H).status_code == 410
     s = c.get(f"/v1/requests/{jid}", headers=H).json()
-    assert s["state"] == "failed" and s["error"] == "Supprimé chez A" and s["files"] == []
+    assert s["state"] == "failed" and s["error"] == "Supprimé chez l'envoyeur" and s["files"] == []

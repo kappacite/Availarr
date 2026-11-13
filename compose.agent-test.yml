@@ -1,4 +1,4 @@
-# Banc d'essai côté B : Tailscale + agent + un Radarr « de B » vierge, sur une seule machine.
+# Banc d'essai côté receveur : Tailscale + agent + un Radarr « du receveur » vierge, sur une seule machine.
 # Marche sous Linux et sous Windows (Docker Desktop) : les bases SQLite et l'état Tailscale sont dans des volumes
 # Docker, seuls la config de l'agent et les films sont dans des dossiers du projet.
 #
@@ -10,13 +10,13 @@
 # Puis :
 #   - page de configuration de l'agent : http://localhost:8789
 #     code : docker compose -f compose.agent-test.yml logs availarr-agent
-#       Tailscale                 = ouvrir le lien affiché et accepter avec le compte Tailscale de A
-#       Adresse du server         = celle affichée par le server de A (http://100.x.y.z:8787)
+#       Tailscale                 = ouvrir le lien affiché et accepter avec le compte Tailscale de l'envoyeur
+#       Adresse du server         = celle affichée par le server de l'envoyeur (http://100.x.y.z:8787)
 #       Adresse de l'agent        = http://availarr-agent:8789
 #       Dossier de téléchargement = /b/downloads/complete
-#       Radarr de B               = http://radarr-b:7878  (clé : Radarr B > Settings > General)
-#       Sonarr de B               = laisser l'exemple (pas de Sonarr dans ce banc)
-#   - Radarr B : http://localhost:7979, root folder /b/movies, indexeur et client SABnzbd comme dans le README.
+#       Radarr du receveur               = http://radarr-b:7878  (clé : Radarr du receveur > Settings > General)
+#       Sonarr du receveur               = laisser l'exemple (pas de Sonarr dans ce banc)
+#   - Radarr du receveur : http://localhost:7979, root folder /b/movies, indexeur et client SABnzbd comme dans le README.
 #
 # Options dans un fichier .env : B_MEDIA=<dossier des films>, PGID=1001 (partage SMB), TS_AUTHKEY=<clé>.
 services:
@@ -31,6 +31,7 @@ services:
       TS_USERSPACE: "false"
       TS_SOCKET: /var/run/tailscale/tailscaled.sock   # partagé : la page de configuration y lit l'état
       TS_EXTRA_ARGS: --advertise-tags=tag:availarr-agent
+      TS_TAILSCALED_EXTRA_ARGS: --port=21641
     volumes:
       - tailscale-state:/var/lib/tailscale
       - tailscale-run:/var/run/tailscale
@@ -39,14 +40,16 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     ports:
       - "8789:8789"   # agent : page de configuration, puis Newznab/SABnzbd
+      - "21641:21641/udp"   # Tailscale (WireGuard)
     networks:
       default:
         aliases: [availarr-agent]   # radarr-b joint l'agent par http://availarr-agent:8789
 
   availarr-agent:
-    build: .
+    build:
+      context: .
+      target: agent
     restart: unless-stopped
-    command: python -m availarr.agent
     user: "${PUID:-1000}:${PGID:-1000}"
     network_mode: service:tailscale
     depends_on: [tailscale]

@@ -221,7 +221,7 @@ def test_server_retried_state_fails_agent_job(env, monkeypatch):
     env.add()
     monkeypatch.setattr(env.server, "status", lambda i: {"state": "retried", "progress": 0.0, "error": None, "files": []})
     step(env.store, env.server)
-    assert (env.job().state, env.job().fail_message) == ("failed", "Relancé chez A")
+    assert (env.job().state, env.job().fail_message) == ("failed", "Relancé chez l'envoyeur")
 
 
 def test_progress_write_never_resurrects_cancelled(env):

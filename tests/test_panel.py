@@ -114,6 +114,15 @@ def test_download_bar_and_filter_kept_on_action(env):
     j = mk(state="pending")
     jobs.status = lambda job: {"progress": 0.42}
     t = c.get("/fragment?f=active", auth=AUTH).text
-    assert "Téléchargement chez toi" in t and "42 %" in t and "Transfert vers B" in t
+    assert "Téléchargement chez toi" in t and "42 %" in t and "Transfert vers le receveur" in t
     r = c.post(f"/jobs/{j.id}/keep?f=active", auth=AUTH)
     assert r.headers["location"] == "/?f=active"
+
+
+def test_agent_status(env):
+    jobs, _, _, c = env
+    assert "Agent hors ligne, jamais vu" in c.get("/fragment", auth=AUTH).text
+    jobs.agent_seen = -30
+    assert "Agent en ligne" in c.get("/fragment", auth=AUTH).text
+    jobs.agent_seen = -600
+    assert "Agent hors ligne, vu il y a 10 min" in c.get("/fragment", auth=AUTH).text

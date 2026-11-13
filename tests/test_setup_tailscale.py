@@ -11,7 +11,7 @@ def test_view_states():
     assert "n'est pas utilisé" in tailscale_view(None, "server", True)
     assert "abc" not in tailscale_view(LOGIN, "agent", False)  # link hidden until the setup code is typed
     agent = tailscale_view(LOGIN, "agent", True)
-    assert "Envoie ce lien à A" in agent and "https://login.tailscale.com/a/abc" in agent
+    assert "Envoie ce lien à l'envoyeur" in agent and "https://login.tailscale.com/a/abc" in agent
     assert "Connecter à Tailscale" in tailscale_view(LOGIN, "server", True)
     run = {"BackendState": "Running", "Self": {"TailscaleIPs": ["100.64.1.2", "fd7a::1"]},
            "CurrentTailnet": {"Name": "me@example.com"}}

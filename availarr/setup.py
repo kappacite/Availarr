@@ -143,7 +143,7 @@ def tailscale_view(st: dict | None, kind: str, show_url: bool) -> str:
         if kind == "server":
             return (f'<p class="hint">Connecte-toi avec ton compte Tailscale : cette machine rejoint ton réseau.</p>'
                     f"{link}")
-        return ("<p class=\"hint\">Envoie ce lien à A. Il l'ouvre dans son navigateur, se connecte à son compte "
+        return ("<p class=\"hint\">Envoie ce lien à l'envoyeur. Il l'ouvre dans son navigateur, se connecte à son compte "
                 "Tailscale et accepte : l'agent rejoint son réseau, sans compte de ton côté.</p>"
                 f'<input readonly value="{escape(url)}" onclick="this.select()"><p>{link}</p>')
     if state == "Unreachable":
@@ -235,7 +235,7 @@ def _section(title, hint, body, test=None):
 def server_form(v: dict) -> str:
     g = v.get
     rows = v.get("profiles") or [{"name": "default", "a": "", "res": "1080", "lang": "", "announce": "1080p.WEB-DL"}]
-    prow = ('<div class="prow">' + _field("Profil chez B", "p_name", "{name}") + _field("Profil chez toi", "p_a", "{a}",
+    prow = ('<div class="prow">' + _field("Profil du receveur", "p_name", "{name}") + _field("Profil chez toi", "p_a", "{a}",
             listid="profiles-radarr") + _field("Résolution min.", "p_res", "{res}", "number")
             + _field("Langues", "p_lang", "{lang}", required=False, hint="ex. French")
             + _field("Qualité annoncée", "p_announce", "{announce}")
@@ -246,7 +246,7 @@ def server_form(v: dict) -> str:
     where = (f"Adresse de ce server à donner à l'agent : <b>http://{ts}:8787</b> (Tailscale)." if ts else
              "Tailscale n'est pas détecté ici : l'agent devra joindre ce server autrement (voir le README).")
     return (
-        _section("Accès", "Le jeton relie l'agent de B à ce server : recopie-le dans la configuration de "
+        _section("Accès", "Le jeton relie l'agent du receveur à ce server : recopie-le dans la configuration de "
                           f"l'agent. {where}",
                  _field("Jeton partagé", "token", g("token"), "readonly", wide=True)
                  + _field("Mot de passe du panel", "admin_password", g("admin_password", ""), "password",
@@ -258,7 +258,7 @@ def server_form(v: dict) -> str:
                           hint="avec l'URL Base, ex. /radarr")
                    + _field("Clé API", "radarr_key", g("radarr_key", ""), test_key="key")
                    + _field("Dossier des films", "radarr_root", g("radarr_root", ""), wide=True, listid="roots-radarr",
-                            hint="pour les films ajoutés pour B")
+                            hint="pour les films ajoutés pour le receveur")
                    + '<datalist id="profiles-radarr"></datalist><datalist id="roots-radarr"></datalist>', "radarr")
         + _section("Ton Sonarr", "Même chose pour les séries.",
                    _field("Adresse", "sonarr_url", g("sonarr_url", "http://192.168.1.10:8989"), test_key="url")
@@ -270,12 +270,12 @@ def server_form(v: dict) -> str:
                    + _field("Utilisateur", "qbit_user", g("qbit_user", "admin"), test_key="user")
                    + _field("Mot de passe", "qbit_pass", g("qbit_pass", ""), "password", test_key="password"),
                    "qbittorrent")
-        + _section("Rétention", "Quand supprimer ce que tu as téléchargé pour B.",
+        + _section("Rétention", "Quand supprimer ce que tu as téléchargé pour le receveur.",
                    _field("Délai après livraison", "keep_days", g("keep_days", "7"), "number", hint="jours")
                    + _field("Seed minimum", "seed_days", g("seed_days", "3"), "number", hint="jours")
                    + _field("Abandon d'un téléchargement", "fail_days", g("fail_days", "7"), "number", hint="jours"))
         + '<fieldset class="card"><legend>Correspondance des profils</legend><p class="hint">Pour chaque profil '
-          "qualité de B, le profil de ton Radarr ou Sonarr à utiliser et ce que B exige au minimum. La ligne "
+          "qualité du receveur, le profil de ton Radarr ou Sonarr à utiliser et ce que le receveur exige au minimum. La ligne "
           "<b>default</b> sert pour tous les profils non listés. Teste ton Radarr pour voir tes profils.</p>"
           f'<div id="prows">{rows_html}</div><template id="prow">{template}</template>'
           '<div class="test"><button type="button" onclick="addRow()">Ajouter une correspondance</button></div>'
@@ -286,22 +286,22 @@ def server_form(v: dict) -> str:
 def agent_form(v: dict) -> str:
     g = v.get
     return (
-        _section("Le server de A", "L'adresse du server chez A (Tailscale conseillé) et le jeton affiché sur "
+        _section("Le server de l'envoyeur", "L'adresse du server chez l'envoyeur (Tailscale conseillé) et le jeton affiché sur "
                                    "sa page de configuration.",
                  _field("Adresse du server", "server_url", g("server_url", "http://100.x.y.z:8787"),
-                        wide=True, test_key="url", hint="affichée par le server de A (page de configuration, logs)")
+                        wide=True, test_key="url", hint="affichée par le server de l'envoyeur (page de configuration, logs)")
                  + _field("Jeton partagé", "token", g("token", ""), wide=True, test_key="token"), "server")
-        + _section("Côté B", "Ce que le Radarr et le Sonarr de B utilisent pour parler à l'agent.",
+        + _section("Côté receveur", "Ce que le Radarr et le Sonarr du receveur utilisent pour parler à l'agent.",
                    _field("Clé API de l'agent", "api_key", g("api_key"), "readonly",
                           hint="à mettre dans l'indexeur et le client SABnzbd")
                    + _field("Adresse de l'agent vue par Radarr", "public_url",
                             g("public_url", "http://availarr-agent:8789"))
                    + _field("Dossier de téléchargement", "complete_dir", g("complete_dir", "/downloads/complete"),
                             wide=True, hint="vu par l'agent, partagé avec Radarr et Sonarr"))
-        + _section("Radarr de B", "Pour lire le profil qualité demandé.",
+        + _section("Radarr du receveur", "Pour lire le profil qualité demandé.",
                    _field("Adresse", "radarr_url", g("radarr_url", "http://radarr:7878"), test_key="url")
                    + _field("Clé API", "radarr_key", g("radarr_key", ""), test_key="key"), "radarr_b")
-        + _section("Sonarr de B", "Même chose pour les séries.",
+        + _section("Sonarr du receveur", "Même chose pour les séries.",
                    _field("Adresse", "sonarr_url", g("sonarr_url", "http://sonarr:8989"), test_key="url")
                    + _field("Clé API", "sonarr_key", g("sonarr_key", ""), test_key="key"), "sonarr_b")
     )
@@ -359,7 +359,7 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
     code = code or secrets.token_hex(3).upper()
     log.warning("Configuration initiale : ouvre la page web de %s et saisis le code %s", kind, code)
     first = {"token": secrets.token_urlsafe(32)} if kind == "server" else {"api_key": secrets.token_urlsafe(24)}
-    title = "Configuration du server (chez A)" if kind == "server" else "Configuration de l'agent (chez B)"
+    title = "Configuration du server (envoyeur)" if kind == "server" else "Configuration de l'agent (receveur)"
     app = FastAPI()
 
     def page(values: dict, error: str = "") -> str:
@@ -376,7 +376,7 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
                 + _section("Code de configuration", "Lis-le avec <code>docker compose logs</code>. Il évite qu'une "
                            "autre personne sur le réseau configure le service à ta place.",
                            _field("Code", "setup_code", values.get("setup_code", ""), wide=True))
-                + '<fieldset class="card"><legend>Tailscale</legend><p class="hint">La liaison entre A et B. '
+                + '<fieldset class="card"><legend>Tailscale</legend><p class="hint">La liaison entre l\'envoyeur et le receveur. '
                   "Première fois : ajoute d'abord les règles de <code>examples/tailscale-acl.hujson</code> dans "
                   "l'admin Tailscale (Access controls), sinon la connexion est refusée.</p>"
                   f'<div id="ts">{tailscale_view(tailscale_status(), kind, False)}</div></fieldset>'
@@ -424,8 +424,8 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
 
 
 def page_done(kind: str) -> str:
-    nxt = ("Le panel s'ouvre à la même adresse dans quelques secondes. Recopie le jeton dans l'agent de B."
-           if kind == "server" else "Ajoute maintenant l'agent dans le Radarr et le Sonarr de B (voir le README).")
+    nxt = ("Le panel s'ouvre à la même adresse dans quelques secondes. Recopie le jeton dans l'agent du receveur."
+           if kind == "server" else "Ajoute maintenant l'agent dans le Radarr et le Sonarr du receveur (voir le README).")
     return ('<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta http-equiv="refresh" content="6;url=/">'
             f"<title>Availarr</title><style>{CSS}</style></head><body>"
             f'<header class="top"><div class="in"><span class="brand">{LOGO}Availarr</span></div></header>'

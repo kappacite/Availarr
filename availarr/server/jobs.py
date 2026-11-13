@@ -26,6 +26,7 @@ class Jobs:
         self.store, self.radarr, self.sonarr, self.cfg, self.clock, self.qbit = store, radarr, sonarr, cfg, clock, qbit
         self.unmapped: set[str] = set()
         self._lock = threading.Lock()  # ponytail: process-wide lock, fine for one agent
+        self.agent_seen: float | None = None  # last authenticated call from the agent; set by the API
         self.transfer: dict[int, tuple[int, int]] = {}  # job id -> (bytes served, total); filled by the API
 
     def lib(self, item: Item) -> Library:
@@ -63,12 +64,14 @@ class Jobs:
             return self._request(item, b_profile, release_title)
 
     def _request(self, item: Item, b_profile: str, release_title: str) -> Job:
-        if job := self.store.active_for(item):
-            # B grabs it again: a fresh transfer, so the old close/"delete" must not delete it mid-way; "keep" stays
-            self.store.set(job.id, closed_at=None, outcome=None)
-            if job.decision == "delete":
-                self.store.set(job.id, decision="none")
-            return self.store.get(job.id)
+        if prev := self.store.active_for(item):
+            # requested again: a new entry that takes over the old one's state (protection, torrents, progress).
+            # Retention only acts on the newest job of an item, so the old one can't delete files mid-transfer.
+            job = self.store.create(item, b_profile, release_title, prev.units, prev.protected_units,
+                                    prev.added_by_tool, self.clock())
+            self.store.set(job.id, state=prev.state, hashes=prev.hashes, ready_at=prev.ready_at,
+                           decision="keep" if prev.decision == "keep" else "none")
+            return self.refresh(self.store.get(job.id))
         req = self.requirement(b_profile)
         if req is None:
             raise ValueError(f"unmapped profile: {b_profile}")
@@ -90,7 +93,7 @@ class Jobs:
         lib, now = self.lib(job.item), self.clock()
         req = self.requirement(job.b_profile)
         if req is None:
-            job.state, job.error = "failed", f"Profil de B sans correspondance : {job.b_profile}"
+            job.state, job.error = "failed", f"Profil du receveur sans correspondance : {job.b_profile}"
             self.store.update(job)
             return job
         units = lib.units(job.item)
@@ -99,7 +102,7 @@ class Jobs:
             job.units = [u.key for u in units]
             job.hashes = lib.hashes(job.item, job.created_at, job.protected_units)
         elif now - job.created_at >= self.cfg.fail_days * 86400:
-            job.state, job.error = "failed", f"Introuvable chez A après {self.cfg.fail_days:g} j"
+            job.state, job.error = "failed", f"Introuvable chez l'envoyeur après {self.cfg.fail_days:g} j"
         else:
             return job
         self.store.update(job)
@@ -112,7 +115,7 @@ class Jobs:
 
     def status(self, job: Job) -> dict:
         if job.deleted_at is not None:
-            return {"state": "failed", "progress": 0.0, "error": "Supprimé chez A", "files": []}
+            return {"state": "failed", "progress": 0.0, "error": "Supprimé chez l'envoyeur", "files": []}
         progress, eta = 0.0, None
         if job.state == "ready":
             progress, eta = 1.0, 0
