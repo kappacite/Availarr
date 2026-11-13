@@ -34,7 +34,7 @@ services:
       - "21641:21641/udp"
 
   availarr-server:
-    image: ghcr.io/kappacite/availarr-server:latest
+    image: kappacitee/availarr-server:latest
     restart: unless-stopped
     network_mode: service:tailscale
     depends_on: [tailscale]

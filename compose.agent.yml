@@ -30,7 +30,7 @@ services:
         aliases: [availarr-agent]   # Radarr/Sonarr sur ce même réseau Docker joignent http://availarr-agent:8789
 
   availarr-agent:
-    image: ghcr.io/kappacite/availarr-agent:latest
+    image: kappacitee/availarr-agent:latest
     restart: unless-stopped
     network_mode: service:tailscale
     depends_on: [tailscale]

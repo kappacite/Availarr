@@ -13,7 +13,7 @@ Availarr permet au receveur d'utiliser la médiathèque de l'envoyeur comme sour
 
 ## Installation
 
-Les images sont publiées sur GitHub Container Registry à chaque push sur `main` : `ghcr.io/kappacite/availarr-server` et `ghcr.io/kappacite/availarr-agent` (amd64 et arm64). Les compose les utilisent directement ; mise à jour : `docker compose pull && docker compose up -d`. Pour construire localement : `docker build --target server .` (ou `--target agent`).
+Les images sont sur Docker Hub : `kappacitee/availarr-server` et `kappacitee/availarr-agent` (amd64 et arm64). Publication : `docker buildx build --platform linux/amd64,linux/arm64 --target server -t kappacitee/availarr-server --push .` (idem `agent`). Les compose les utilisent directement ; mise à jour : `docker compose pull && docker compose up -d`. Pour construire localement : `docker build --target server .` (ou `--target agent`).
 
 ### Côté envoyeur (server)
 
