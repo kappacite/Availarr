@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from availarr.common import Item
 from availarr.server.config import ServerConfig
-from availarr.server.jobs import Jobs
+from availarr.server.jobs import Jobs, _disk_size
 
 log = logging.getLogger(__name__)
 
@@ -50,13 +50,16 @@ def iter_file(path: str, start: int, mbps: float, chunk: int = 1 << 20,
             f.close()
 
 
-def _stream(jobs: Jobs, id: int, path: str, start: int, size: int, mbps: float, chunk: int = 1 << 20):
+def _stream(jobs: Jobs, id: int, path: str, start: int, size: int, mbps: float, chunk: int = 1 << 20,
+            index: int = 0, total: int | None = None):
     pos, wall, t0 = start, time.time(), time.monotonic()
+    served = jobs.served.setdefault(id, {})  # file index -> furthest byte served, so a season adds up
     try:
         for data in iter_file(path, start, mbps, chunk):
             pos += len(data)
             yield data
-            jobs.transfer[id] = (max(pos, jobs.transfer.get(id, (0, 0))[0]), size)
+            served[index] = max(pos, served.get(index, 0))
+            jobs.transfer[id] = (sum(served.values()), total or size)
     finally:  # also when B drops the connection: the bytes that went through still measure the link
         if pos > start:
             try:
@@ -132,7 +135,9 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
         if status_code == 206:
             headers["Content-Range"] = f"bytes {start}-{size - 1}/{size}"
 
-        return StreamingResponse(_stream(jobs, id, path, start, size, cfg.bandwidth_mbps), status_code=status_code, headers=headers,
+        total = sum(_disk_size(f) for f in jobs._files(job))  # the whole request, not this one file
+        return StreamingResponse(_stream(jobs, id, path, start, size, cfg.bandwidth_mbps, index=index, total=total),
+                                 status_code=status_code, headers=headers,
                                  media_type="application/octet-stream")
 
     @app.post("/v1/requests/{id}/close", status_code=204)

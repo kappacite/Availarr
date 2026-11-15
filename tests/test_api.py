@@ -205,3 +205,22 @@ def test_blocked_agent_403(env):
     jobs.store.set_agent("a1", blocked=1)
     assert c.get("/v1/ping", headers=A("a1")).status_code == 403
     assert c.get("/v1/ping", headers=A("a2")).status_code == 200
+
+
+def test_season_transfer_counts_all_files(tmp_path):
+    # a season pack is served file by file: progress must add up over the whole season, not one episode
+    files = []
+    for n in (1, 2):
+        f = tmp_path / f"S01E0{n}.mkv"
+        f.write_bytes(DATA)
+        files.append(Unit(f"episode:1:1:{n}", True, True, FileInfo(1080, "WEBDL-1080p", ["French"], str(f), 1000)))
+    lib = FakeLibrary(files)
+    cfg = make_cfg(bandwidth_mbps=0)
+    jobs = Jobs(JobStore(str(tmp_path / "j.db")), lib, lib, cfg, lambda: 42.0)
+    c = TestClient(create_api(jobs, cfg))
+    jid = c.post("/v1/requests", json={"item": "season:1:1", "b_profile": P, "release_title": "x"},
+                 headers=H).json()["job_id"]
+    c.get(f"/v1/requests/{jid}/files/0", headers=H)
+    assert jobs.transfer[jid] == (1000, 2000)
+    c.get(f"/v1/requests/{jid}/files/1", headers={**H, "Range": "bytes=600-"})
+    assert jobs.transfer[jid] == (2000, 2000)

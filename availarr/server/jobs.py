@@ -27,6 +27,7 @@ class Jobs:
         self.unmapped: set[str] = set()
         self._lock = threading.Lock()  # ponytail: process-wide lock, fine for a handful of agents
         self.transfer: dict[int, tuple[int, int]] = {}  # job id -> (bytes served, total); filled by the API
+        self.served: dict[int, dict[int, int]] = {}  # job id -> file index -> bytes served
 
     def lib(self, item: Item) -> Library:
         return self.radarr if item.kind == "movie" else self.sonarr
