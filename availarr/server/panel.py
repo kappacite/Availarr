@@ -36,7 +36,7 @@ def fmt_seedline(ts, seed_days: float) -> str:
         return f"↓ {fmt_mo(sum(t.dlspeed for t in ts))} · {sum(t.peers for t in ts)} pairs"
     left = seed_days * 86400 - min(t.seeding or 0 for t in ts)
     d, h = divmod(int(left), 86400)
-    reste = f"reste {d} j {h // 3600:02d} h · " if left > 0 else ""
+    reste = f"reste <b>{d} j {h // 3600:02d} h</b> · " if left > 0 else ""
     ratio = f"{min(t.ratio for t in ts):.2f}".replace(".", ",")
     return f"{reste}↑ {fmt_mo(sum(t.upspeed for t in ts))} · ratio {ratio}"
 
@@ -222,7 +222,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return "qBittorrent injoignable", None, False, ""
         secs = [t.seeding for t in ts if t.progress >= 1 and t.seeding is not None]
         line = fmt_seedline(ts, cfg.seed_days) if ts else ""
-        ok = all(s >= cfg.seed_days * 86400 for s in secs)  # absent or still downloading: nothing blocks yet
+        ok = all(t.progress >= 1 and (t.seeding is None or t.seeding >= cfg.seed_days * 86400) for t in ts)  # as retention.seed_ok: downloading is not ok
         if not secs:
             return ("torrent absent" if job.hashes and not ts else "—"), None, ok, line
         s = min(secs)
@@ -281,7 +281,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         seed_html = (bar("seed", "Seed réel", seed_pct, seed_txt, done=seed_pct is not None and seed_pct >= 100)
                      if seed_pct is not None else bar("seed", "Seed réel", None, seed_txt))
         if line:
-            seed_html += f'<div class="seedline">{escape(line)}</div>'
+            seed_html += f'<div class="seedline">{line}</div>'
         dim = " dim" if job.deleted_at is not None or job.state == "failed" else ""
         name, tags = split_title(job.release_title)
         chips = "".join(f'<span class="tag">{escape(t)}</span>' for t in tags)

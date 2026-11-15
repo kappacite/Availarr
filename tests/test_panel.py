@@ -144,4 +144,12 @@ def test_seed_line_seeding(env):
     mk()
     qbit.torrents["h"] = Torrent("h", "n", "stalledUP", 1.0, 7 * 3600, 1_887_437, 0, 0.42, 3)
     t = c.get("/", auth=AUTH).text
-    assert "reste 2 j 17 h" in t and "↑ 1,8 Mo/s" in t and "ratio 0,42" in t
+    assert "reste <b>2 j 17 h</b>" in t and "↑ 1,8 Mo/s" in t and "ratio 0,42" in t
+
+
+def test_removal_waits_while_still_downloading(env):
+    from availarr.server.qbit import Torrent
+    jobs, qbit, mk, c = env
+    mk(decision="delete")
+    qbit.torrents["h"] = Torrent("h", "n", "downloading", 0.4, None, 0, 1, 0.0, 1)
+    assert "⏳ dès 3 j de seed" in c.get("/", auth=AUTH).text

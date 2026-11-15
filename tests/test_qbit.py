@@ -96,3 +96,8 @@ def test_info_ignores_bad_hash():
     q, calls = make([])
     assert q.info(["all", ""]) == {}
     assert calls == []
+
+
+def test_info_tolerates_nulls():
+    t = make([{"hash": H, "progress": None, "completion_on": None, "upspeed": None, "ratio": None, "num_seeds": None}])[0].info([H])[H]
+    assert t.seeding is None and t.peers == 0 and t.ratio == 0.0
