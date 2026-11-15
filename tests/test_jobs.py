@@ -229,3 +229,101 @@ def test_failure_blocks_only_that_agent(mk):
     jobs.store.set(j.id, state="failed")
     assert jobs.lookup(M, P, agent="a1") is None
     assert jobs.lookup(M, P, agent="a2")
+
+
+S1 = Item("season", 1, 4)
+EPS = ["episode:1:4:1", "episode:1:4:2"]
+
+
+def test_rerequest_after_failure_is_not_protected(mk):
+    # first request: A doesn't have the season; Availarr makes Sonarr monitor it, then the request fails
+    lib = FakeLibrary([Unit(k, True, False, None) for k in EPS])
+    j = mk(lib)
+    first = j.request(S1, P, "T")
+    assert first.protected_units == []
+    j.store.set(first.id, state="failed")
+    lib.units = [Unit(k, True, True, None) for k in EPS]  # monitored by Availarr, not by the user
+    again = j.request(S1, P, "T")
+    assert again.id != first.id and again.protected_units == []
+
+
+def test_rerequest_keeps_protection_of_what_was_already_there(mk):
+    lib = FakeLibrary([Unit(EPS[0], True, True, None), Unit(EPS[1], True, False, None)])
+    j = mk(lib)
+    first = j.request(S1, P, "T")
+    assert first.protected_units == [EPS[0]]
+    j.store.set(first.id, state="failed")
+    lib.units = [Unit(k, True, True, None) for k in EPS]
+    assert j.request(S1, P, "T").protected_units == [EPS[0]]
+
+
+def test_deleted_earlier_job_does_not_count(mk):
+    lib = FakeLibrary([Unit(k, True, False, None) for k in EPS])
+    j = mk(lib)
+    first = j.request(S1, P, "T")
+    j.store.set(first.id, state="failed", deleted_at=1.0)
+    lib.units = [Unit(k, True, True, None) for k in EPS]  # the user monitors it themselves since
+    assert j.request(S1, P, "T").protected_units == EPS
+
+
+def test_repair_protection_fixes_old_jobs_and_their_torrents(mk):
+    lib = FakeLibrary([Unit(k, True, True, GOOD) for k in EPS], hashes=["h"])
+    j = mk(lib)
+    first = j.store.create(S1, P, "T", EPS, [], True, 0)
+    j.store.set(first.id, state="failed")
+    wrong = j.store.create(S1, P, "T", EPS, EPS, False, 1)  # computed by the old code: wrongly protected
+    j.store.set(wrong.id, state="ready", ready_at=2.0)
+    j.repair_protection()
+    fixed = j.store.get(wrong.id)
+    assert fixed.protected_units == [] and fixed.hashes == ["h"]
+    j.repair_protection()  # idempotent
+    assert j.store.get(wrong.id).protected_units == []
+
+
+def test_repair_protection_retries_when_arr_is_down(mk):
+    lib = FakeLibrary([Unit(k, True, True, GOOD) for k in EPS])
+    j = mk(lib)
+    first = j.store.create(S1, P, "T", EPS, [], True, 0)
+    j.store.set(first.id, state="failed")
+    wrong = j.store.create(S1, P, "T", EPS, EPS, False, 1)
+    j.store.set(wrong.id, state="ready", ready_at=2.0)
+
+    class Down:
+        def hashes(self, *a):
+            raise OSError("sonarr down")
+    j.lib = lambda item: Down()
+    j.repair_protection()
+    assert j.store.get(wrong.id).protected_units == EPS  # unchanged: retried next tick
+
+
+def test_rerequest_after_failed_season_placeholder(mk):
+    # Availarr created the series: the first job failed before ready, keeping the placeholder key season:1:4
+    lib = FakeLibrary([Unit(k, True, True, None) for k in EPS])
+    j = mk(lib)
+    first = j.store.create(S1, P, "T", ["season:1:4"], [], True, 0)
+    j.store.set(first.id, state="failed")
+    assert j.request(S1, P, "T").protected_units == []
+
+
+def test_hashes_include_torrent_grabbed_for_the_earlier_request(mk, clock):
+    # the first request's grab was imported before the second request existed: still this request's torrent
+    lib = FakeLibrary([Unit(k, True, True, None) for k in EPS])
+    j = mk(lib)
+    first = j.store.create(S1, P, "T", EPS, [], True, 5)
+    j.store.set(first.id, state="failed")
+    clock.t = 100
+    again = j.request(S1, P, "T")
+    lib.units = [Unit(k, True, True, GOOD) for k in EPS]
+    j.refresh(again)
+    assert lib.calls["hashes"][-1][1] == 5  # since the earlier request, not 100
+
+
+def test_repair_keeps_protection_that_was_already_there(mk):
+    lib = FakeLibrary([Unit(k, True, True, GOOD) for k in EPS], hashes=["h"])
+    j = mk(lib)
+    first = j.store.create(S1, P, "T", EPS, [EPS[0]], True, 0)  # E1 was A's own before any request
+    j.store.set(first.id, state="failed")
+    later = j.store.create(S1, P, "T", EPS, EPS, False, 1)
+    j.store.set(later.id, state="ready", ready_at=2.0)
+    j.repair_protection()
+    assert j.store.get(later.id).protected_units == [EPS[0]]

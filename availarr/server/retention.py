@@ -98,6 +98,10 @@ def remove_entry(jobs: Jobs, qbit, job: Job, all_jobs: list[Job], now: float) ->
 
 
 def tick(jobs: Jobs, qbit, now: float) -> list[int]:
+    try:
+        jobs.repair_protection()
+    except Exception:
+        log.exception("retention: repairing protection failed")
     for job in jobs.store.all():
         if job.state == "pending":
             try:

@@ -77,7 +77,9 @@ class Jobs:
             raise ValueError(f"unmapped profile: {b_profile}")
         lib = self.lib(item)
         units = lib.units(item)
-        protected = [u.key for u in units if u.file or u.monitored]  # before ensure() touches anything
+        # A's own = there (file or monitored) before Availarr touched it: not what an earlier request had monitored
+        caused = self._caused(item, None)
+        protected = [u.key for u in units if (u.file or u.monitored) and not self._hit(u.key, caused)]
         added = False
         if not all(satisfies(u.file, req) for u in units):
             current = lib.profile_name(item)
@@ -86,6 +88,52 @@ class Jobs:
         job = self.store.create(item, b_profile, release_title, [u.key for u in units], protected,
                                 added, self.clock(), agent)
         return self.refresh(job)
+
+    @staticmethod
+    def _hit(unit: str, keys: set[str]) -> bool:
+        """unit is in keys, or under a season placeholder (season:x:s covers episode:x:s:*) of a job never ready."""
+        return unit in keys or any(k.startswith("season:") and unit.startswith("episode:" + k[7:] + ":") for k in keys)
+
+    def _earlier(self, item: Item, before: int | None, jobs: list[Job] | None = None) -> list[Job]:
+        # ponytail: an earlier job that failed and was never cleaned keeps counting; if the user deleted and
+        # re-added that entry themselves, it is no longer protected (Garder covers it)
+        return [o for o in (jobs if jobs is not None else self.store.all())
+                if o.deleted_at is None and (before is None or o.id < before) and o.item.ext_id == item.ext_id
+                and (o.item.kind == "movie") == (item.kind == "movie")]
+
+    def _caused(self, item: Item, before: int | None, jobs: list[Job] | None = None) -> set[str]:
+        """Units an earlier, not deleted request on the same movie/series made A fetch or monitor."""
+        out: set[str] = set()
+        for o in self._earlier(item, before, jobs):
+            out |= set(o.units) - set(o.protected_units)
+        return out
+
+    def _since(self, job: Job, jobs: list[Job] | None = None) -> float:
+        """Torrents count from the first request that made A fetch these units, not only from this one."""
+        return min([job.created_at] + [o.created_at for o in self._earlier(job.item, job.id, jobs)
+                                       if any(self._hit(u, set(o.units) - set(o.protected_units)) for u in job.units)])
+
+    def repair_protection(self) -> None:
+        """Jobs saved before the fix above may count an earlier request's episodes as A's own: never deleted,
+        torrents ignored. Drop that protection and pick their torrents up again; retried on each tick."""
+        all_jobs = sorted(self.store.all(), key=lambda j: j.id)
+        for job in all_jobs:
+            if job.deleted_at is not None or not job.protected_units:
+                continue
+            caused = self._caused(job.item, job.id, all_jobs)
+            keep = [u for u in job.protected_units if not self._hit(u, caused)]
+            if keep == job.protected_units:
+                continue
+            try:
+                hashes = (self.lib(job.item).hashes(job.item, self._since(job, all_jobs), keep) if job.state == "ready"
+                          else job.hashes)
+            except Exception as e:  # noqa: BLE001 - arr down: try again next tick
+                log.warning("job %s: protection not repaired yet: %s", job.id, e)
+                continue
+            self.store.set(job.id, protected_units=keep, hashes=hashes)
+            job.protected_units, job.hashes = keep, hashes  # later jobs judge against the repaired value
+            log.info("job %s: protection repaired, %d unit(s) no longer counted as already there",
+                     job.id, len(caused & set(job.units)))
 
     def refresh(self, job: Job) -> Job:
         if job.state != "pending":
@@ -100,7 +148,7 @@ class Jobs:
         if units and all(satisfies(u.file, req) for u in units):
             job.state, job.ready_at = "ready", now
             job.units = [u.key for u in units]
-            job.hashes = lib.hashes(job.item, job.created_at, job.protected_units)
+            job.hashes = lib.hashes(job.item, self._since(job), job.protected_units)
         elif now - job.created_at >= self.cfg.fail_days * 86400:
             job.state, job.error = "failed", f"Introuvable chez l'envoyeur après {self.cfg.fail_days:g} j"
         else:

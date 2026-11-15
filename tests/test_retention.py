@@ -287,9 +287,11 @@ def test_overlapping_episode_job_blocks_season(env):
     s = mk(item=S, units=["episode:5:1:1", "episode:5:1:2"])
     e = mk(item=E, units=["episode:5:1:2"], protected=["episode:5:1:2"], agent="a2", closed_at=7 * D)
     assert tick(jobs, qbit, 7 * D) == [] and lib.removed == []
-    assert tick(jobs, qbit, 14 * D) == [s.id]
-    assert lib.removed == [(S, ["episode:5:1:1", "episode:5:1:2"], True)]  # e is covered: nothing else holds the series
-    assert jobs.store.get(e.id).deleted_at == 14 * D
+    # e's protection came from s monitoring the episode, not from A: repaired, so either job may do the removal
+    assert tick(jobs, qbit, 14 * D) in ([s.id], [e.id])
+    assert sorted(u for _, keys, _ in lib.removed for u in keys) == ["episode:5:1:1", "episode:5:1:2"]
+    assert lib.removed[-1][2] is True  # nothing else holds the series
+    assert jobs.store.get(s.id).deleted_at == jobs.store.get(e.id).deleted_at == 14 * D
 
 
 def test_fully_protected_other_agent_waits_then_goes(env):
@@ -327,7 +329,9 @@ def test_units_caused_by_any_covered_job_are_removed_by_tick(env):
     S, E = Item("season", 1, 1), Item("episode", 1, 1, 2)
     a1 = mk(item=E, units=["episode:1:1:2"], agent="a1")
     a2 = mk(item=S, units=["episode:1:1:1", "episode:1:1:2"], protected=["episode:1:1:2"], agent="a2")
-    assert sorted(tick(jobs, qbit, 7 * D)) == [a1.id, a2.id]
+    # a2's protection of E2 came from a1, not from A: repaired, so one removal covers both jobs
+    done = tick(jobs, qbit, 7 * D)
+    assert done and set(done) <= {a1.id, a2.id}
     assert sorted(u for _, keys, _ in lib.removed for u in keys) == ["episode:1:1:1", "episode:1:1:2"]
     assert lib.removed[-1][2] is True  # the last one drops the entry
     assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 7 * D
