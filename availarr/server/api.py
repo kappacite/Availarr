@@ -72,15 +72,18 @@ def _item(key: str) -> Item:
 
 
 def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
-    def auth(authorization: str = Header("")):
+    def auth(authorization: str = Header(""), agent: str = Header("legacy", alias="X-Availarr-Agent"),
+             name: str = Header("Agent", alias="X-Availarr-Agent-Name")) -> str:
         if not secrets.compare_digest(authorization.encode(), f"Bearer {cfg.token}".encode()):
             raise HTTPException(401, "bad token")
-        jobs.agent_seen = time.time()  # the panel shows whether the agent is online
+        if jobs.store.seen(agent, name, time.time()).blocked:  # also feeds the panel's online status
+            raise HTTPException(403, "agent blocked")
+        return agent
 
     app = FastAPI(dependencies=[Depends(auth)])
 
-    def job_or_404(id: int):
-        if (job := jobs.store.get(id)) is None:
+    def job_or_404(id: int, agent: str):
+        if (job := jobs.store.get(id)) is None or job.agent != agent:
             raise HTTPException(404, "unknown job")
         return job
 
@@ -89,24 +92,24 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
         return {"ok": True}
 
     @app.post("/v1/lookup")
-    def lookup(body: LookupBody):
-        return {"release": jobs.lookup(_item(body.item), body.b_profile, body.episodes)}
+    def lookup(body: LookupBody, agent: str = Depends(auth)):
+        return {"release": jobs.lookup(_item(body.item), body.b_profile, body.episodes, agent)}
 
     @app.post("/v1/requests")
-    def request(body: RequestIn):
+    def request(body: RequestIn, agent: str = Depends(auth)):
         item = _item(body.item)
         try:
-            return {"job_id": jobs.request(item, body.b_profile, body.release_title).id}
+            return {"job_id": jobs.request(item, body.b_profile, body.release_title, agent).id}
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     @app.get("/v1/requests/{id}")
-    def status(id: int):
-        return jobs.status(jobs.refresh(job_or_404(id)))
+    def status(id: int, agent: str = Depends(auth)):
+        return jobs.status(jobs.refresh(job_or_404(id, agent)))
 
     @app.get("/v1/requests/{id}/files/{index}")
-    def file(id: int, index: int, request: Request):
-        job = jobs.refresh(job_or_404(id))
+    def file(id: int, index: int, request: Request, agent: str = Depends(auth)):
+        job = jobs.refresh(job_or_404(id, agent))
         if job.deleted_at is not None:
             raise HTTPException(410, "deleted")
         try:
@@ -132,7 +135,7 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
                                  media_type="application/octet-stream")
 
     @app.post("/v1/requests/{id}/close", status_code=204)
-    def close(id: int, body: CloseIn):
-        jobs.close(job_or_404(id), body.outcome)
+    def close(id: int, body: CloseIn, agent: str = Depends(auth)):
+        jobs.close(job_or_404(id, agent), body.outcome)
 
     return app

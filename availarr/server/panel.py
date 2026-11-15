@@ -282,7 +282,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         return txt
 
     def agent_status(now: float) -> str:
-        seen = jobs.agent_seen
+        seen = max((a.last_seen for a in jobs.store.agents()), default=None)  # provisional, per-agent list later
         if seen is not None and now - seen < AGENT_ONLINE_S:
             return '<span class="pill p-ok">Agent en ligne</span>'
         txt = "jamais vu depuis le démarrage" if seen is None else f"vu {fmt_ago(now - seen)}"

@@ -122,7 +122,7 @@ def test_download_bar_and_filter_kept_on_action(env):
 def test_agent_status(env):
     jobs, _, _, c = env
     assert "Agent hors ligne, jamais vu" in c.get("/fragment", auth=AUTH).text
-    jobs.agent_seen = -30
+    jobs.store.seen("legacy", "Agent", -30)
     assert "Agent en ligne" in c.get("/fragment", auth=AUTH).text
-    jobs.agent_seen = -600
+    jobs.store.seen("legacy", "Agent", -600)
     assert "Agent hors ligne, vu il y a 10 min" in c.get("/fragment", auth=AUTH).text

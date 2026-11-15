@@ -11,6 +11,7 @@ from tests.fakes import FakeLibrary, make_cfg
 DATA = bytes(range(250)) * 4
 P = "HD-1080p FR"
 H = {"Authorization": "Bearer change-me"}
+from tests.test_jobs import M
 BODY = {"item": "movie:603", "b_profile": P}
 
 
@@ -150,3 +151,50 @@ def test_deleted_job_file_410_and_status_failed(env, jid):
     assert c.get(f"/v1/requests/{jid}/files/0", headers=H).status_code == 410
     s = c.get(f"/v1/requests/{jid}", headers=H).json()
     assert s["state"] == "failed" and s["error"] == "Supprimé chez l'envoyeur" and s["files"] == []
+
+
+def A(n, name="N"):
+    return H | {"X-Availarr-Agent": n, "X-Availarr-Agent-Name": name}
+
+
+def test_agent_headers_register(env):
+    c, jobs = env
+    c.post("/v1/lookup", json=BODY, headers=A("a1", "Lyon"))
+    assert jobs.store.agent("a1").name == "Lyon"
+
+
+def test_no_header_is_legacy(env, jid):
+    assert env[1].store.get(jid).agent == "legacy"
+
+
+def test_other_agent_gets_404(env):
+    c, _ = env
+    jid = c.post("/v1/requests", json={**BODY, "release_title": "x"}, headers=A("a1")).json()["job_id"]
+    c.get("/v1/ping", headers=A("a2"))  # a1 is already a UUID agent: nothing is adopted
+    assert c.get(f"/v1/requests/{jid}", headers=A("a1")).status_code == 200
+    for r in (c.get(f"/v1/requests/{jid}", headers=A("a2")), c.get(f"/v1/requests/{jid}/files/0", headers=A("a2")),
+              c.post(f"/v1/requests/{jid}/close", json={"outcome": "delivered"}, headers=A("a2"))):
+        assert r.status_code == 404
+
+
+def test_first_agent_adopts_legacy(env):
+    c, jobs = env
+    a = jobs.store.create(M, P, "t", ["movie:603"], [], True, 1.0)
+    b = jobs.store.create(M, P, "t", ["movie:603"], [], True, 2.0)
+    jobs.store.set(a.id, state="ready", outcome="delivered")
+    jobs.store.set(b.id, state="ready")
+    assert c.get(f"/v1/requests/{a.id}", headers=A("a1")).status_code == 200
+    assert jobs.store.get(a.id).agent == jobs.store.get(b.id).agent == "a1"
+    assert c.get(f"/v1/requests/{b.id}", headers=A("a1")).status_code == 200
+    assert c.get(f"/v1/requests/{b.id}", headers=A("a2")).status_code == 404
+    late = c.post("/v1/requests", json={**BODY, "release_title": "x"}, headers=H).json()["job_id"]
+    c.get("/v1/ping", headers=A("a3"))
+    assert jobs.store.get(late).agent == "legacy"
+
+
+def test_blocked_agent_403(env):
+    c, jobs = env
+    c.get("/v1/ping", headers=A("a1"))
+    jobs.store.set_agent("a1", blocked=1)
+    assert c.get("/v1/ping", headers=A("a1")).status_code == 403
+    assert c.get("/v1/ping", headers=A("a2")).status_code == 200

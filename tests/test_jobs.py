@@ -213,3 +213,19 @@ def test_status_eta_from_qbittorrent(mk):
     assert j.status(job)["progress"] == 0.25 and j.status(job)["eta"] == 300
     j.qbit = Q({"a": 60, "b": None})
     assert j.status(job)["eta"] is None
+
+
+def test_request_per_agent_creates_two_jobs(mk):
+    jobs = mk(FakeLibrary([NONE]))
+    a = jobs.request(M, P, "t", agent="a1")
+    b = jobs.request(M, P, "t", agent="a2")
+    assert a.id != b.id and (a.agent, b.agent) == ("a1", "a2")
+    assert len(jobs.lib(M).ensure_calls) == 2
+
+
+def test_failure_blocks_only_that_agent(mk):
+    jobs = mk(FakeLibrary([NONE]))
+    j = jobs.request(M, P, "t", agent="a1")
+    jobs.store.set(j.id, state="failed")
+    assert jobs.lookup(M, P, agent="a1") is None
+    assert jobs.lookup(M, P, agent="a2")

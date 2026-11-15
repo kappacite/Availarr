@@ -26,7 +26,6 @@ class Jobs:
         self.store, self.radarr, self.sonarr, self.cfg, self.clock, self.qbit = store, radarr, sonarr, cfg, clock, qbit
         self.unmapped: set[str] = set()
         self._lock = threading.Lock()  # ponytail: process-wide lock, fine for one agent
-        self.agent_seen: float | None = None  # last authenticated call from the agent; set by the API
         self.transfer: dict[int, tuple[int, int]] = {}  # job id -> (bytes served, total); filled by the API
 
     def lib(self, item: Item) -> Library:
@@ -38,12 +37,12 @@ class Jobs:
             self.unmapped.add(b_profile)
         return req
 
-    def lookup(self, item: Item, b_profile: str, episodes: int = 0) -> dict | None:
+    def lookup(self, item: Item, b_profile: str, episodes: int = 0, agent: str = "legacy") -> dict | None:
         req = self.requirement(b_profile)
         if req is None:
             log.warning("lookup %s: B profile %r has no [profiles] entry and no 'default'", item.key(), b_profile)
             return None
-        if self.store.failed_for(item):
+        if self.store.failed_for(item, agent):
             log.info("lookup %s: blocked after a failure (panel: Réessayer)", item.key())
             return None
         lib = self.lib(item)
@@ -59,16 +58,16 @@ class Jobs:
         gb = self.cfg.movie_gb if item.kind == "movie" else self.cfg.episode_gb * max(len(units), episodes)
         return {"title": make_title(name, year, item, req.announce), "size": int(gb * 10**9)}
 
-    def request(self, item: Item, b_profile: str, release_title: str) -> Job:
+    def request(self, item: Item, b_profile: str, release_title: str, agent: str = "legacy") -> Job:
         with self._lock:
-            return self._request(item, b_profile, release_title)
+            return self._request(item, b_profile, release_title, agent)
 
-    def _request(self, item: Item, b_profile: str, release_title: str) -> Job:
-        if prev := self.store.active_for(item):
+    def _request(self, item: Item, b_profile: str, release_title: str, agent: str) -> Job:
+        if prev := self.store.active_for(item, agent):
             # requested again: a new entry that takes over the old one's state (protection, torrents, progress).
             # Retention only acts on the newest job of an item, so the old one can't delete files mid-transfer.
             job = self.store.create(item, b_profile, release_title, prev.units, prev.protected_units,
-                                    prev.added_by_tool, self.clock())
+                                    prev.added_by_tool, self.clock(), agent)
             self.store.set(job.id, state=prev.state, hashes=prev.hashes, ready_at=prev.ready_at,
                            decision="keep" if prev.decision == "keep" else "none")
             return self.refresh(self.store.get(job.id))
@@ -84,7 +83,7 @@ class Jobs:
             change = current is not None and current not in req.a_profiles
             added = lib.ensure(item, req.a_profiles[0], change)
         job = self.store.create(item, b_profile, release_title, [u.key for u in units], protected,
-                                added, self.clock())
+                                added, self.clock(), agent)
         return self.refresh(job)
 
     def refresh(self, job: Job) -> Job:
