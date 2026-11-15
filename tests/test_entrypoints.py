@@ -37,3 +37,17 @@ def test_agent_build(tmp_path, caplog, monkeypatch):
     monkeypatch.setattr(agent_main, "step", lambda *a: 1 / 0)
     step_once()
     assert "agent step failed" in caplog.text
+
+
+def test_ensure_identity_writes_uuid(tmp_path):
+    import uuid
+
+    from availarr.agent.config import ensure_identity, load_agent_config
+    p = tmp_path / "agent.toml"
+    p.write_text('server_url="http://s"\ntoken="t"\napi_key="k"\npublic_url="http://a"\ncomplete_dir="/d"\n'
+                 '[radarr]\nurl="r"\nkey="1"\n[sonarr]\nurl="s"\nkey="2"\n', encoding="utf-8")
+    cfg = ensure_identity(str(p), load_agent_config(str(p)))
+    uuid.UUID(cfg.agent_id)
+    again = load_agent_config(str(p))
+    assert again.agent_id == cfg.agent_id and again.admin_password == "k" and again.agent_name
+    assert ensure_identity(str(p), again).agent_id == cfg.agent_id

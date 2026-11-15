@@ -9,6 +9,7 @@ import socket
 import tempfile
 import threading
 import time
+import uuid
 from html import escape
 
 import httpx
@@ -286,7 +287,14 @@ def server_form(v: dict) -> str:
 def agent_form(v: dict) -> str:
     g = v.get
     return (
-        _section("Le server de l'envoyeur", "L'adresse du server chez l'envoyeur (Tailscale conseillé) et le jeton affiché sur "
+        _section("Identité", "Le nom sous lequel l'envoyeur voit cet agent. L'identifiant est créé une fois pour toutes "
+                             "et ne change pas.",
+                 _field("Nom de l'agent", "agent_name", g("agent_name", socket.gethostname()),
+                        hint="affiché dans le panel de l'envoyeur")
+                 + _field("Identifiant", "agent_id", g("agent_id", ""), "readonly")
+                 + _field("Mot de passe de cette interface", "admin_password", g("admin_password", ""), "password",
+                          wide=True))
+        + _section("Le server de l'envoyeur", "L'adresse du server chez l'envoyeur (Tailscale conseillé) et le jeton affiché sur "
                                    "sa page de configuration.",
                  _field("Adresse du server", "server_url", g("server_url", "http://100.x.y.z:8787"),
                         wide=True, test_key="url", hint="affichée par le server de l'envoyeur (page de configuration, logs)")
@@ -339,7 +347,9 @@ def server_config(form) -> dict:
 
 def agent_config(form) -> dict:
     f = form.get
-    return {"server_url": f("server_url", "").rstrip("/"), "token": f("token", ""), "api_key": f("api_key", ""),
+    return {"agent_name": f("agent_name", ""), "agent_id": f("agent_id", ""),
+            "admin_password": f("admin_password", ""),
+            "server_url": f("server_url", "").rstrip("/"), "token": f("token", ""), "api_key": f("api_key", ""),
             "public_url": f("public_url", "").rstrip("/"), "complete_dir": f("complete_dir", ""),
             "radarr": {"url": f("radarr_url", "").rstrip("/"), "key": f("radarr_key", "")},
             "sonarr": {"url": f("sonarr_url", "").rstrip("/"), "key": f("sonarr_key", "")}}
@@ -358,7 +368,8 @@ def _values(kind: str, form) -> dict:
 def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str | None = None) -> FastAPI:
     code = code or secrets.token_hex(3).upper()
     log.warning("Configuration initiale : ouvre la page web de %s et saisis le code %s", kind, code)
-    first = {"token": secrets.token_urlsafe(32)} if kind == "server" else {"api_key": secrets.token_urlsafe(24)}
+    first = {"token": secrets.token_urlsafe(32)} if kind == "server" else {"api_key": secrets.token_urlsafe(24),
+                                                                    "agent_id": str(uuid.uuid4())}
     title = "Configuration du server (envoyeur)" if kind == "server" else "Configuration de l'agent (receveur)"
     app = FastAPI()
 

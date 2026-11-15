@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 ETA: dict[str, float] = {}
 # Fallback A -> B throughput (bytes/s) when the server has no history yet (it sends its average as "rate").
 RATE = [100e6 / 8]
+# Last contact with the server, shown on the agent's own page.
+SERVER: dict = {"ok_at": None, "error": None}
 
 
 def _key(item: Item | str) -> str:
@@ -22,9 +24,12 @@ def _key(item: Item | str) -> str:
 
 
 class ServerClient:
-    def __init__(self, base_url: str, token: str, client: httpx.Client | None = None):
+    def __init__(self, base_url: str, token: str, client: httpx.Client | None = None,
+                 agent_id: str = "", agent_name: str = ""):
         self.client = client or httpx.Client(base_url=base_url, timeout=httpx.Timeout(60, connect=30))
         self.headers = {"Authorization": f"Bearer {token}"}
+        if agent_id:
+            self.headers |= {"X-Availarr-Agent": agent_id, "X-Availarr-Agent-Name": agent_name}
 
     def _call(self, method: str, path: str, **kw) -> httpx.Response:
         r = self.client.request(method, path, headers=self.headers, **kw)

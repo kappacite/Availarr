@@ -1,5 +1,7 @@
+import socket
 import tomllib
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import dataclass, field, replace
 
 
 @dataclass
@@ -17,6 +19,9 @@ class AgentConfig:
     db_path: str = "/data/agent.db"
     categories: list[str] = field(default_factory=lambda: ["radarr", "sonarr", "tv", "movies"])
     poll_seconds: float = 30
+    agent_id: str = ""
+    agent_name: str = ""
+    admin_password: str = ""
 
 
 def load_agent_config(path: str) -> AgentConfig:
@@ -29,7 +34,7 @@ def load_agent_config(path: str) -> AgentConfig:
         except KeyError:
             raise ValueError(f"missing config key: {sec if key is None else f'[{sec}] {key}'}") from None
 
-    opt = {k: d[k] for k in ("port", "db_path", "categories", "poll_seconds") if k in d}
+    opt = {k: d[k] for k in ("port", "db_path", "categories", "poll_seconds", "agent_id", "agent_name", "admin_password") if k in d}
     return AgentConfig(
         server_url=need("server_url"), token=need("token"), api_key=need("api_key"),
         public_url=need("public_url"), complete_dir=need("complete_dir"),
@@ -37,3 +42,18 @@ def load_agent_config(path: str) -> AgentConfig:
         sonarr_url=need("sonarr", "url"), sonarr_key=need("sonarr", "key"),
         **opt,
     )
+
+
+def ensure_identity(path: str, cfg: AgentConfig) -> AgentConfig:
+    """An agent.toml from before multi-agent has no identity: create it once and write it back."""
+    if cfg.agent_id:
+        return cfg
+    from availarr.setup import toml_dump
+    cfg = replace(cfg, agent_id=str(uuid.uuid4()), agent_name=cfg.agent_name or socket.gethostname(),
+                  admin_password=cfg.admin_password or cfg.api_key)
+    with open(path, "rb") as fh:
+        d = tomllib.load(fh)
+    d.update(agent_id=cfg.agent_id, agent_name=cfg.agent_name, admin_password=cfg.admin_password)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(toml_dump(d))
+    return cfg

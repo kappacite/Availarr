@@ -8,15 +8,15 @@ from fastapi import FastAPI
 
 from availarr.agent import newznab, sabnzbd
 from availarr.agent.b_arr import BArr
-from availarr.agent.config import load_agent_config
+from availarr.agent.config import ensure_identity, load_agent_config
 from availarr.agent.db import AgentStore
-from availarr.agent.transfer import ServerClient, step
+from availarr.agent.transfer import SERVER, ServerClient, step
 from availarr.setup import run_setup, watch_tailscale
 
 
 def build(cfg):
     store = AgentStore(cfg.db_path)
-    server = ServerClient(cfg.server_url, cfg.token)
+    server = ServerClient(cfg.server_url, cfg.token, agent_id=cfg.agent_id, agent_name=cfg.agent_name)
     b = BArr(cfg.radarr_url, cfg.radarr_key, cfg.sonarr_url, cfg.sonarr_key)
     app = FastAPI()
     app.include_router(newznab.router(cfg, server, b))
@@ -24,7 +24,12 @@ def build(cfg):
 
     def step_once():
         try:
-            server.ping()  # heartbeat: the server's panel shows the agent online even when idle
+            try:
+                server.ping()  # heartbeat: the server's panel shows the agent online even when idle
+                SERVER.update(ok_at=time.time(), error=None)
+            except Exception as e:
+                SERVER["error"] = str(e)
+                raise
             step(store, server)
         except Exception:
             logging.exception("agent step failed")
@@ -37,7 +42,7 @@ def main():
     path = os.environ.get("AVAILARR_CONFIG", "/config/agent.toml")
     if not os.path.exists(path):  # first run: web setup on the agent port, then carry on
         run_setup("agent", path, load_agent_config, port=8789)
-    cfg = load_agent_config(path)
+    cfg = ensure_identity(path, load_agent_config(path))
     app, step_once = build(cfg)
     watch_tailscale()
 

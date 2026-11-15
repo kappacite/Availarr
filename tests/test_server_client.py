@@ -17,3 +17,16 @@ def test_client_sends_item_keys_as_json():
     assert c.lookup(Item("movie", 118340), "HD-1080p") is None
     assert c.request(Item("season", 1, 2), "HD-1080p", "x") == 1
     assert [b["item"] for b in sent] == ["movie:118340", "season:1:2"]
+
+
+def test_client_sends_identity():
+    seen = []
+
+    def handler(req):
+        seen.append((req.headers["X-Availarr-Agent"], req.headers["X-Availarr-Agent-Name"]))
+        return httpx.Response(200)
+
+    c = ServerClient("http://s", "t", httpx.Client(base_url="http://s", transport=httpx.MockTransport(handler)),
+                     agent_id="u1", agent_name="Lyon")
+    c.ping()
+    assert seen == [("u1", "Lyon")]

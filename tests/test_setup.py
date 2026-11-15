@@ -75,3 +75,17 @@ def test_tailscale_ip(monkeypatch):
     assert setup.tailscale_ip() == "100.101.102.103"
     S.ip = "192.168.1.2"
     assert setup.tailscale_ip() is None
+
+
+def test_agent_setup_writes_identity(tmp_path):
+    path = tmp_path / "agent.toml"
+    c = TestClient(create_setup("agent", str(path), load_agent_config, code="ABC123"))
+    assert 'name="agent_id"' in c.get("/").text
+    r = c.post("/save", data={"setup_code": "ABC123", "agent_name": "Lyon", "agent_id": "u-1", "admin_password": "pw",
+                              "server_url": "http://a:8787", "token": "t", "api_key": "k",
+                              "public_url": "http://agent:8789", "complete_dir": "/dl",
+                              "radarr_url": "http://r", "radarr_key": "1", "sonarr_url": "http://s", "sonarr_key": "2"})
+    assert r.status_code == 200
+    cfg = load_agent_config(str(path))
+    assert (cfg.agent_name, cfg.agent_id, cfg.admin_password) == ("Lyon", "u-1", "pw")
+    assert 'agent_name = "Lyon"' in path.read_text(encoding="utf-8")
