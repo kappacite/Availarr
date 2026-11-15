@@ -63,17 +63,30 @@ def _covered(job: Job, all_jobs: list[Job]) -> tuple[list[Job], list[str]]:
         covered |= more
 
 
-def remove_entry(jobs: Jobs, qbit, job: Job, all_jobs: list[Job], now: float) -> None:
-    covered, keys = _covered(job, all_jobs)
+def remove_entry(jobs: Jobs, qbit, job: Job, all_jobs: list[Job], now: float) -> bool:
+    """Remove job's files once every job sharing them is done with them (job itself is not judged: it may be
+    refused). False, and nothing touched, if one isn't, if any says keep, or if job is already gone."""
+    cfg = jobs.cfg
+    judged, _ = _covered(job, all_jobs)
+    # a job that is followed (requested again) is judged through its newest request, never closed itself
+    if not all(o.id == job.id or any(_follows(o, p) for p in judged)
+               or _done(jobs.store.get(o.id), qbit, now, cfg.keep_days, cfg.seed_days) for o in judged):
+        return False
+    fresh = jobs.store.all()  # no network call between this read and remove()
+    last = next(o for o in fresh if o.id == job.id)
+    covered, keys = _covered(last, fresh)
     ids = {o.id for o in covered}
+    if last.deleted_at is not None or not ids <= {o.id for o in judged} or any(o.decision == "keep" for o in covered):
+        return False
     # a partly protected entry must never be dropped: Sonarr would delete the protected episodes too
-    drop = job.added_by_tool and {u for o in covered for u in o.units} <= set(keys) and not any(
-        o.id not in ids and _live(job, o) for o in all_jobs)
-    jobs.lib(job.item).remove(job.item, keys, drop)
+    drop = last.added_by_tool and {u for o in covered for u in o.units} <= set(keys) and not any(
+        o.id not in ids and _live(last, o) for o in fresh)
+    jobs.lib(last.item).remove(last.item, keys, drop)
     for h in dict.fromkeys(h for o in covered for h in o.hashes):
         qbit.delete(h)
     for o in covered:  # they all shared these files: gone with them
         jobs.store.set(o.id, deleted_at=now)
+    return True
 
 
 def tick(jobs: Jobs, qbit, now: float) -> list[int]:
@@ -83,37 +96,27 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
                 jobs.refresh(job)
             except Exception:
                 log.exception("retention: refreshing job %s failed", job.id)
-    all_jobs = jobs.store.all()
     cfg = jobs.cfg
     done = []
-    for snap in all_jobs:
+    for snap in jobs.store.all():
         try:
             job = jobs.store.get(snap.id)  # the panel may have decided since the snapshot
             if not _eligible(job, qbit, now, cfg.keep_days, cfg.seed_days):
                 continue
             # read again: a job removed earlier in this tick no longer claims anything
-            claimants = [o for o in _covered(job, jobs.store.all())[0] if o.id != job.id]
+            group = [o for o in _covered(job, jobs.store.all())[0] if o.item == job.item]
             # one remover per item: each agent's newest job decides for its older ones (requested again), and
             # among agents the first one removes, its job being the one that added and fetched the files
             # (a fully protected job never removes: it didn't fetch anything)
-            group = [job] + [o for o in claimants if o.item == job.item]
-            if min(o.id for o in group if not fully_protected(o) and not any(_follows(o, p) for p in group)) != job.id:
-                continue
-            # every other job still on these files must be done with them too, even one that found them already here
-            if not all(_follows(o, job) or _done(jobs.store.get(o.id), qbit, now, cfg.keep_days, cfg.seed_days)
-                       for o in claimants):
+            heads = [o.id for o in group if not fully_protected(o) and not any(_follows(o, p) for p in group)]
+            if min(heads, default=None) != job.id:
                 continue
             job = jobs.store.get(job.id)
             if not _eligible(job, qbit, now, cfg.keep_days, cfg.seed_days):
                 continue
-            fresh = jobs.store.all()  # no network call between this read and remove()
-            ok = {job.id} | {o.id for o in claimants}
-            last = next(o for o in fresh if o.id == job.id)
-            if last.deleted_at is not None or any(
-                    o.id not in ok or o.decision == "keep" for o in _covered(last, fresh)[0]):
-                continue
-            remove_entry(jobs, qbit, last, fresh, now)
-            done.append(job.id)
+            # remove_entry judges every other job on these files, then re-reads before touching anything
+            if remove_entry(jobs, qbit, job, jobs.store.all(), now):
+                done.append(job.id)
         except Exception:
             log.exception("retention: job %s failed", snap.id)
     return done

@@ -250,8 +250,8 @@ def test_keep_on_other_agent_set_during_tick_is_honoured(env):
 
 def test_remove_entry_covers_same_item_claimants(env):
     jobs, lib, qbit, mk = env
-    a1, a2 = mk(agent="a1"), mk(agent="a2", closed_at=None)
-    remove_entry(jobs, qbit, a1, jobs.store.all(), 5)
+    a1, a2 = mk(agent="a1"), mk(agent="a2", decision="delete")
+    assert remove_entry(jobs, qbit, a1, jobs.store.all(), 5)
     assert lib.removed == [(M, ["movie:603"], True)] and qbit.deleted == ["h"]
     assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 5
 
@@ -317,9 +317,9 @@ def test_units_caused_by_any_covered_job_are_removed(env):
     S, E = Item("season", 1, 1), Item("episode", 1, 1, 2)
     a1 = mk(item=E, units=["episode:1:1:2"], agent="a1")
     a2 = mk(item=S, units=["episode:1:1:1", "episode:1:1:2"], protected=["episode:1:1:2"], agent="a2")
-    remove_entry(jobs, qbit, a1, jobs.store.all(), 5)  # one call: a2 needs E02, and its own E01 goes along
+    assert remove_entry(jobs, qbit, a1, jobs.store.all(), 7 * D)  # one call: a2 needs E02, its own E01 goes along
     assert lib.removed == [(E, ["episode:1:1:2", "episode:1:1:1"], True)]
-    assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 5
+    assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 7 * D
 
 
 def test_units_caused_by_any_covered_job_are_removed_by_tick(env):
@@ -340,3 +340,30 @@ def test_unit_protected_by_every_covered_job_is_kept(env):
     mk(item=S, units=["episode:1:1:1", "episode:1:1:2"], protected=["episode:1:1:1"], agent="a2")
     assert tick(jobs, qbit, 7 * D) == [a1.id]
     assert lib.removed == [(S, ["episode:1:1:2"], False)]
+
+
+def test_other_agent_requested_again_old_unclosed(env):
+    jobs, lib, qbit, mk = env
+    a1 = mk(agent="a1")
+    old2 = mk(agent="a2", closed_at=None)  # a2 asked again: its old job is never closed, the new one is
+    new2 = mk(agent="a2")
+    assert tick(jobs, qbit, 100 * D) == [a1.id]
+    assert all(jobs.store.get(j.id).deleted_at == 100 * D for j in (a1, old2, new2))
+
+
+def test_remove_entry_refuses_while_other_agent_needs_files(env):
+    jobs, lib, qbit, mk = env
+    a1 = mk(agent="a1")
+    a2 = mk(agent="a2", state="pending", closed_at=None)
+    assert remove_entry(jobs, qbit, a1, jobs.store.all(), 5) is False
+    jobs.store.set(a2.id, state="ready", decision="keep")
+    assert remove_entry(jobs, qbit, a1, jobs.store.all(), 5) is False
+    assert lib.removed == [] and qbit.deleted == []
+    assert jobs.store.get(a1.id).deleted_at is None and jobs.store.get(a2.id).deleted_at is None
+
+
+def test_remove_entry_removes_a_refused_job(env):
+    jobs, lib, qbit, mk = env
+    j = mk(state="failed", closed_at=None)  # Task 5: refused, so it holds no claim, but it is the remover
+    assert remove_entry(jobs, qbit, j, jobs.store.all(), 5)
+    assert lib.removed == [(M, ["movie:603"], True)] and jobs.store.get(j.id).deleted_at == 5
