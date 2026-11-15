@@ -154,3 +154,21 @@ table{font-size:13px}}
 LOGO = ('<svg width="34" height="16" viewBox="0 0 34 16" aria-hidden="true"><line x1="8" y1="8" x2="26" y2="8" '
         'stroke="#66728c" stroke-width="2" stroke-dasharray="2 3"/><circle cx="7" cy="8" r="5" fill="#e8a23a"/>'
         '<circle cx="27" cy="8" r="5" fill="#38b6c9"/></svg>')
+
+
+def fmt_bytes(n: float) -> str:
+    for unit in ("o", "Ko", "Mo"):
+        if n < 1024:
+            return f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.1f} Go".replace(".", ",")
+
+
+def fmt_eta(seconds: float) -> str:
+    s = int(seconds)
+    h, m = divmod(s // 60, 60)
+    return f"{h} h {m:02d} min" if h else f"{max(1, m)} min"
+
+
+def fmt_mo(bps: float | None) -> str:
+    return f"{bps / 2**20:.1f} Mo/s".replace(".", ",") if bps else "—"

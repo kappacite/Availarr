@@ -11,7 +11,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from availarr.server import stats
 from availarr.setup import SETUP_CSS, SETUP_JS, same_origin, _restart as default_restart, config_router
-from availarr.ui import CSS, LOGO
+from availarr.ui import CSS, LOGO, fmt_bytes, fmt_eta, fmt_mo  # noqa: F401 (re-exported)
 from availarr.server.config import ServerConfig, load_server_config
 from availarr.server.db import Agent
 from availarr.server.jobs import Jobs
@@ -69,14 +69,6 @@ def fmt_removal(job, now: float, cfg: ServerConfig, seed_is_ok: bool) -> str:
     return "—"
 
 
-def fmt_bytes(n: float) -> str:
-    for unit in ("o", "Ko", "Mo"):
-        if n < 1024:
-            return f"{n:.0f} {unit}"
-        n /= 1024
-    return f"{n:.1f} Go".replace(".", ",")
-
-
 def fmt_ago(seconds: float) -> str:
     s = max(0, int(seconds))
     if s < 3600:
@@ -84,12 +76,6 @@ def fmt_ago(seconds: float) -> str:
     if s < 86400:
         return f"il y a {s // 3600} h"
     return f"il y a {s // 86400} j"
-
-
-def fmt_eta(seconds: float) -> str:
-    s = int(seconds)
-    h, m = divmod(s // 60, 60)
-    return f"{h} h {m:02d} min" if h else f"{max(1, m)} min"
 
 
 def fmt_dur(seconds: float | None) -> str:
@@ -103,10 +89,6 @@ def fmt_dur(seconds: float | None) -> str:
     if s < 86400:
         return f"{s // 3600} h {s // 60 % 60:02d} min"
     return f"{s // 86400} j {s // 3600 % 24} h"
-
-
-def fmt_mo(bps: float | None) -> str:
-    return f"{bps / 2**20:.1f} Mo/s".replace(".", ",") if bps else "—"
 
 
 def fmt_mbit(bps: float | None) -> str:

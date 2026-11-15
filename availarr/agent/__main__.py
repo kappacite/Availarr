@@ -11,16 +11,18 @@ from availarr.agent.b_arr import BArr
 from availarr.agent.config import ensure_identity, load_agent_config
 from availarr.agent.db import AgentStore
 from availarr.agent.transfer import SERVER, ServerClient, step
-from availarr.setup import run_setup, watch_tailscale
+from availarr.agent.ui import create_ui
+from availarr.setup import _restart, run_setup, watch_tailscale
 
 
-def build(cfg):
+def build(cfg, config_path="/config/agent.toml", restart=_restart):
     store = AgentStore(cfg.db_path)
     server = ServerClient(cfg.server_url, cfg.token, agent_id=cfg.agent_id, agent_name=cfg.agent_name)
     b = BArr(cfg.radarr_url, cfg.radarr_key, cfg.sonarr_url, cfg.sonarr_key)
     app = FastAPI()
     app.include_router(newznab.router(cfg, server, b))
     app.include_router(sabnzbd.router(cfg, store, server, b))
+    app.include_router(create_ui(cfg, store, config_path, restart))
 
     def step_once():
         try:
@@ -43,7 +45,7 @@ def main():
     if not os.path.exists(path):  # first run: web setup on the agent port, then carry on
         run_setup("agent", path, load_agent_config, port=8789)
     cfg = ensure_identity(path, load_agent_config(path))
-    app, step_once = build(cfg)
+    app, step_once = build(cfg, path)
     watch_tailscale()
 
     def loop():
