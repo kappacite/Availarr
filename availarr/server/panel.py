@@ -10,8 +10,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from availarr.server import stats
+from availarr.setup import SETUP_CSS, SETUP_JS, _restart as default_restart, config_router
 from availarr.ui import CSS, LOGO
-from availarr.server.config import ServerConfig
+from availarr.server.config import ServerConfig, load_server_config
 from availarr.server.db import Agent
 from availarr.server.jobs import Jobs
 from availarr.server.retention import fully_protected
@@ -149,7 +150,7 @@ setInterval(tick,+main.dataset.every);
 """
 
 
-def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAPI:
+def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_path=None, restart=None) -> FastAPI:
     basic = HTTPBasic()
     samples: dict[int, tuple[float, int, float]] = {}  # job id -> (monotonic time, bytes, smoothed bytes/s)
 
@@ -608,9 +609,13 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 "Le débit moyen des derniers envois sert aussi à estimer le temps restant affiché chez le receveur.</p>"
                 f'</div></div><div class="card figs">{figs}</div>{chart}{three}{table}')
 
+    def tabs_html(tab: str) -> str:
+        return "".join(f'<a href="{href}"{" aria-current=page" if tab == name else ""}>{name}</a>'
+                       for name, href in (("Agents", "/"), ("Statistiques", "/stats"))
+                       + ((("Configuration", "/config"),) if config_path else ()))
+
     def page(tab: str, inner: str, src: str, every: int, title: str | None = None) -> str:
-        tabs = "".join(f'<a href="{href}"{" aria-current=page" if tab == name else ""}>{name}</a>'
-                       for name, href in (("Agents", "/"), ("Statistiques", "/stats")))
+        tabs = tabs_html(tab)
         return ('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 f"<title>{escape(title or tab)}, Availarr</title><style>{CSS}</style></head><body>"
@@ -685,5 +690,17 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         else:
             jobs.store.set(id, decision=ACTIONS[action])
         return RedirectResponse(f"{back if BACK_OK.fullmatch(back) else '/'}?f={f if f in FILTERS else 'all'}", 303)
+
+    if config_path:
+        def config_page(title: str, inner: str) -> str:
+            return ('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+                    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                    f"<title>{escape(title)}, Availarr</title><style>{CSS}{SETUP_CSS}</style></head>"
+                    '<body data-test="/config/test"><header class="top"><div class="in">'
+                    f'<a class="brand" href="/">{LOGO}Availarr</a><nav class="tabs" aria-label="Sections">'
+                    f'{tabs_html("Configuration")}</nav></div></header><main class="page">{inner}</main>'
+                    f"<script>{SETUP_JS}</script></body></html>")
+        app.include_router(config_router("server", config_path, load_server_config, restart or default_restart,
+                                         config_page))
 
     return app

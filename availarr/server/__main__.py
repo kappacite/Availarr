@@ -17,7 +17,7 @@ from availarr.server.sonarr import Sonarr
 from availarr.setup import run_setup, tailscale_ip, watch_tailscale
 
 
-def build(cfg):
+def build(cfg, config_path=None):
     qbit = QBit(cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass)
     jobs = Jobs(JobStore(cfg.db_path), Radarr(cfg.radarr_url, cfg.radarr_key, cfg.radarr_root),
                 Sonarr(cfg.sonarr_url, cfg.sonarr_key, cfg.sonarr_root), cfg, qbit=qbit)
@@ -28,7 +28,7 @@ def build(cfg):
         except Exception:
             logging.exception("retention tick failed")
 
-    return create_api(jobs, cfg), create_panel(jobs, qbit, cfg), retention_once
+    return create_api(jobs, cfg), create_panel(jobs, qbit, cfg, config_path=config_path), retention_once
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
     cfg = load_server_config(path)
     if ts := tailscale_ip():
         logging.warning("Adresse du server pour l'agent (Tailscale) : http://%s:%s", ts, cfg.api_port)
-    api, panel, retention_once = build(cfg)
+    api, panel, retention_once = build(cfg, path)
     watch_tailscale()
 
     def retention_loop():

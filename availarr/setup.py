@@ -9,12 +9,13 @@ import socket
 import tempfile
 import threading
 import time
+import tomllib
 import uuid
 from html import escape
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Query, Request
+from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from availarr.ui import CSS, LOGO
@@ -51,22 +52,23 @@ border-radius:10px;margin:0 0 18px}
 """
 
 SETUP_JS = """
-const code=()=>document.querySelector('[name=setup_code]').value;
+const codeEl=document.querySelector('[name=setup_code]');
 async function test(btn){
-  const box=btn.closest('fieldset'),out=box.querySelector('output'),f={kind:btn.dataset.kind,code:code()};
+  const box=btn.closest('fieldset'),out=box.querySelector('output'),f={kind:btn.dataset.kind};
+  if(codeEl)f.code=codeEl.value;
   box.querySelectorAll('[data-k]').forEach(i=>f[i.dataset.k]=i.value);
   out.className='';out.textContent='Test en cours…';
   try{
-    const r=await (await fetch('/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)})).json();
+    const r=await (await fetch(document.body.dataset.test,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)})).json();
     out.className=r.ok?'ok':'ko';out.textContent=r.msg;
     if(r.profiles){const d=document.getElementById('profiles-'+f.kind);d.innerHTML=r.profiles.map(p=>'<option value="'+p.replace(/"/g,'&quot;')+'">').join('')}
     if(r.roots){const d=document.getElementById('roots-'+f.kind);d.innerHTML=r.roots.map(p=>'<option value="'+p.replace(/"/g,'&quot;')+'">').join('')}
   }catch(e){out.className='ko';out.textContent='Pas de réponse du service de configuration.'}
 }
 async function ts(){
-  try{const r=await fetch('/tailscale?code='+encodeURIComponent(code()));if(r.ok)document.getElementById('ts').innerHTML=await r.text()}catch(e){}
+  try{const r=await fetch('/tailscale?code='+encodeURIComponent(codeEl.value));if(r.ok)document.getElementById('ts').innerHTML=await r.text()}catch(e){}
 }
-setInterval(ts,3000);document.addEventListener('input',e=>{if(e.target.name==='setup_code')ts()});
+if(codeEl){setInterval(ts,3000);document.addEventListener('input',e=>{if(e.target.name==='setup_code')ts()})}
 function addRow(){
   const t=document.getElementById('prow'),c=t.content.cloneNode(true);
   document.getElementById('prows').appendChild(c);
@@ -377,7 +379,7 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
         form = server_form(values) if kind == "server" else agent_form(values)
         return ('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                f"<title>{title}, Availarr</title><style>{CSS}{SETUP_CSS}</style></head><body>"
+                f"<title>{title}, Availarr</title><style>{CSS}{SETUP_CSS}</style></head><body data-test=\"/test\">"
                 f'<header class="top"><div class="in"><span class="brand">{LOGO}Availarr</span></div></header>'
                 f'<main class="page"><div class="head"><div><h2>{title}</h2><p class="sub">Aucune configuration '
                 f"trouvée dans <b>{escape(path)}</b>. Remplis ce formulaire : il écrit ce fichier, puis le service "
@@ -441,6 +443,99 @@ def page_done(kind: str) -> str:
             f"<title>Availarr</title><style>{CSS}</style></head><body>"
             f'<header class="top"><div class="in"><span class="brand">{LOGO}Availarr</span></div></header>'
             f'<main class="page"><h2>Configuration enregistrée</h2><p class="sub">{nxt}</p></main></body></html>')
+
+
+def form_values(kind: str, d: dict) -> dict:
+    """Loaded TOML back into form field values (inverse of server_config / agent_config); passwords blanked."""
+    r, s, q, ret = (d.get(k, {}) for k in ("radarr", "sonarr", "qbittorrent", "retention"))
+    if kind == "agent":
+        return {"agent_name": d.get("agent_name", ""), "agent_id": d.get("agent_id", ""), "admin_password": "",
+                "server_url": d.get("server_url", ""), "token": d.get("token", ""), "api_key": d.get("api_key", ""),
+                "public_url": d.get("public_url", ""), "complete_dir": d.get("complete_dir", ""),
+                "radarr_url": r.get("url", ""), "radarr_key": r.get("key", ""),
+                "sonarr_url": s.get("url", ""), "sonarr_key": s.get("key", "")}
+    return {"token": d.get("token", ""), "admin_password": "", "bandwidth_mbps": d.get("bandwidth_mbps", 0),
+            "radarr_url": r.get("url", ""), "radarr_key": r.get("key", ""), "radarr_root": r.get("root_folder", ""),
+            "sonarr_url": s.get("url", ""), "sonarr_key": s.get("key", ""), "sonarr_root": s.get("root_folder", ""),
+            "qbit_url": q.get("url", ""), "qbit_user": q.get("user", ""), "qbit_pass": "",
+            "keep_days": ret.get("keep_days", 7), "seed_days": ret.get("seed_days", 3),
+            "fail_days": ret.get("fail_days", 7),
+            "profiles": [{"name": n, "a": ", ".join(p.get("a_profiles", [])), "res": p.get("min_resolution", 1080),
+                          "lang": ", ".join(p.get("languages", [])), "announce": p.get("announce", "")}
+                         for n, p in d.get("profiles", {}).items()]}
+
+
+def _restart():
+    threading.Timer(1.0, os._exit, (0,)).start()  # Docker's restart: unless-stopped brings us back
+
+
+def config_router(kind: str, path: str, loader, restart=_restart, page=None) -> APIRouter:
+    """Config page for an already configured service: GET/POST /config and POST /config/test (auth is the caller's)."""
+    title = "Configuration"
+    r = APIRouter()
+    password_keys = ("admin_password", "qbit_pass") if kind == "server" else ("admin_password",)
+
+    def default_page(t: str, inner: str) -> str:
+        return ('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                f'<title>{t}, Availarr</title><style>{CSS}{SETUP_CSS}</style></head><body data-test="/config/test">'
+                f'<header class="top"><div class="in"><span class="brand">{LOGO}Availarr</span></div></header>'
+                f'<main class="page">{inner}</main><script>{SETUP_JS}</script></body></html>')
+    wrap = page or default_page
+
+    def current() -> dict:
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+
+    def render(values: dict, error: str = "") -> str:
+        form = server_form(values) if kind == "server" else agent_form(values)
+        form = re.sub(r'(<input type="password"[^>]*?) required', lambda m: m[1], form).replace(
+            'type="password"', 'type="password" placeholder="laisser vide pour garder l&#x27;actuel"')
+        return wrap(title, f'<div class="head"><div><h2>{title}</h2><p class="sub">Les modifications sont écrites '
+                    f"dans <b>{escape(path)}</b>. Le service redémarre pour les appliquer ; les transferts en cours "
+                    "reprennent seuls.</p></div></div>"
+                    + (f'<p class="error">{escape(error)}</p>' if error else "")
+                    + f'<form method="post" action="/config">{form}'
+                    '<div class="actions"><button class="primary">Enregistrer et redémarrer</button></div></form>')
+
+    @r.get("/config", response_class=HTMLResponse)
+    def show():
+        return render(form_values(kind, current()))
+
+    @r.post("/config/test")
+    async def test(request: Request):
+        f = await request.json()
+        return check(f.get("kind", ""), f)
+
+    @r.post("/config", response_class=HTMLResponse)
+    async def save(request: Request):
+        form = await request.form()
+        old = current()
+        data = server_config(form) if kind == "server" else agent_config(form)
+        if not form.get("admin_password"):
+            data["admin_password"] = old.get("admin_password", "")
+        if kind == "server" and not form.get("qbit_pass"):
+            data["qbittorrent"]["password"] = old.get("qbittorrent", {}).get("password", "")
+        # keys the form does not know (ports, db_path, sizes...) survive the rewrite
+        merged = {**old, **{k: ({**old.get(k, {}), **v} if isinstance(v, dict) and k != "profiles" else v)
+                            for k, v in data.items()}}
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".toml")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(toml_dump(merged))
+        try:
+            loader(tmp)
+        except (ValueError, KeyError, TypeError) as e:
+            os.remove(tmp)
+            values = _values(kind, form)
+            return HTMLResponse(render({**values, **{k: "" for k in password_keys if not values.get(k)}},
+                                       f"Configuration incomplète : {e}"), 400)
+        os.replace(tmp, path)
+        log.warning("Configuration écrite dans %s, redémarrage", path)
+        restart()
+        return HTMLResponse(wrap(title, '<meta http-equiv="refresh" content="8;url=/config"><h2>Configuration '
+                                 "enregistrée, redémarrage…</h2>" '<p class="sub">Cette page se recharge toute seule.</p>'))
+
+    return r
 
 
 def run_setup(kind: str, path: str, loader, port: int) -> None:

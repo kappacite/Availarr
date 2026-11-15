@@ -408,3 +408,23 @@ def test_back_to_agent_page(env):
     r = c.post(f"/jobs/{j.id}/keep?f=kept&back=%2Fagents%2Flegacy", auth=AUTH)
     assert r.headers["location"] == "/agents/legacy?f=kept"
     assert c.post(f"/jobs/{j.id}/keep?back=%2Fagents%2Fa%20b", auth=AUTH).headers["location"] == "/?f=all"
+
+
+def test_config_tab_and_auth(tmp_path):
+    cfg_file = tmp_path / "server.toml"
+    cfg_file.write_text('token="t"\nadmin_password="pw"\n[radarr]\nurl="http://r"\nkey="k"\nroot_folder="/m"\n'
+                        '[sonarr]\nurl="http://s"\nkey="k"\nroot_folder="/t"\n'
+                        '[qbittorrent]\nurl="http://q"\nuser="u"\npassword="p"\n', encoding="utf-8")
+    lib = FakeLibrary([])
+    jobs = Jobs(JobStore(str(tmp_path / "p.db")), lib, lib, make_cfg(), Clock())
+    cfg = jobs.cfg
+    plain = TestClient(create_panel(jobs, FakeQbit({}), cfg, lambda: 0))
+    assert "/config" not in plain.get("/", auth=("u", cfg.admin_password)).text
+    c = TestClient(create_panel(jobs, FakeQbit({}), cfg, lambda: 0, config_path=str(cfg_file), restart=lambda: None))
+    assert c.get("/config").status_code == 401
+    assert c.post("/config/test", json={"kind": "server"}).status_code == 401
+    auth = ("u", cfg.admin_password)
+    assert 'href="/config"' in c.get("/", auth=auth).text
+    page = c.get("/config", auth=auth).text
+    assert "Enregistrer et redémarrer" in page and 'aria-current=page>Configuration' in page
+    assert c.post("/config/test", json={"kind": "x", "url": "ftp://a"}, auth=auth).json()["ok"] is False
