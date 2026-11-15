@@ -157,16 +157,17 @@ class JobStore:
         with closing(sqlite3.connect(self.path)) as c:
             c.row_factory = sqlite3.Row
             with c:
-                if c.execute("SELECT 1 FROM agents WHERE id=?", (agent_id,)).fetchone():
-                    c.execute("UPDATE agents SET last_seen=?, name=CASE WHEN renamed THEN name ELSE ? END WHERE id=?",
-                              (now, name, agent_id))
-                else:
-                    first = agent_id != "legacy" and not c.execute(
-                        "SELECT 1 FROM agents WHERE id!='legacy'").fetchone()
-                    c.execute("INSERT INTO agents (id,name,first_seen,last_seen) VALUES (?,?,?,?)",
-                              (agent_id, name, now, now))
+                first = agent_id != "legacy" and not c.execute(
+                    "SELECT 1 FROM agents WHERE id!='legacy'").fetchone()
+                # OR IGNORE: two simultaneous first calls; only the one that inserted adopts
+                if c.execute("INSERT OR IGNORE INTO agents (id,name,first_seen,last_seen) VALUES (?,?,?,?)",
+                             (agent_id, name, now, now)).rowcount:
                     if first:
                         c.execute("UPDATE jobs SET agent=? WHERE agent='legacy'", (agent_id,))
+                        c.execute("DELETE FROM agents WHERE id='legacy'")
+                else:
+                    c.execute("UPDATE agents SET last_seen=?, name=CASE WHEN renamed THEN name ELSE ? END WHERE id=?",
+                              (now, name, agent_id))
                 return _agent(c.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone())
 
     def ensure_agent(self, id: str, name: str) -> None:

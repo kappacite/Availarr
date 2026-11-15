@@ -304,12 +304,12 @@ Dans le panel : **Agents** (liste) > les demandes d'un agent > le détail d'une 
 
 Sur une demande :
 
-- **Refuser** : la demande échoue chez le receveur, dont Radarr/Sonarr cherchent alors ailleurs. Cet agent ne peut plus redemander ce titre tant que tu n'as pas cliqué **Réessayer**. Les fichiers sont nettoyés quand plus aucun receveur n'en a besoin.
-- **Retirer** : masque du panel une demande terminée. La rétention n'est pas affectée.
+- **Refuser** : la demande échoue chez le receveur, qui cherche ailleurs. Cet agent ne peut plus redemander ce titre tant que tu n'as pas cliqué **Réessayer**. Les fichiers sont nettoyés quand plus aucun receveur n'en a besoin.
+- **Retirer** : masque du panel une demande terminée ou en échec. La rétention n'est pas affectée.
 
 Une demande annulée par le receveur est figée dans le panel.
 
-**Mise à jour depuis une version à un seul agent** : un `agent.toml` sans `agent_id` en reçoit un automatiquement. Les anciennes demandes du server sont reprises par le premier agent mis à jour qui se connecte. L'ordre de mise à jour n'a pas d'importance.
+**Mise à jour depuis une version à un seul agent** : un `agent.toml` sans `agent_id` en reçoit un automatiquement. Les anciennes demandes du server sont reprises par le premier agent mis à jour qui se connecte. Server ou agent en premier, peu importe ; mais mets à jour l'agent existant avant d'en ajouter un autre, sinon le nouveau reprend ses demandes.
 
 ## Rétention
 

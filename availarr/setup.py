@@ -528,6 +528,8 @@ def config_router(kind: str, path: str, loader, restart=_restart, page=None) -> 
             data["admin_password"] = old.get("admin_password", "")
         if kind == "server" and not form.get("qbit_pass"):
             data["qbittorrent"]["password"] = old.get("qbittorrent", {}).get("password", "")
+        if kind == "agent" and old.get("agent_id"):  # the identity is never rewritten from a form
+            data["agent_id"] = old["agent_id"]
         # keys the form does not know (ports, db_path, sizes...) survive the rewrite
         merged = {**old, **{k: ({**old.get(k, {}), **v} if isinstance(v, dict) and k != "profiles" else v)
                             for k, v in data.items()}}

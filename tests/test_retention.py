@@ -397,3 +397,30 @@ def test_refused_waits_for_other_agent_then_cleans(env):
     tick(jobs, qbit, 9 * D)
     assert lib.removed and jobs.store.get(o.id).deleted_at == 9 * D
     assert jobs.store.get(r.id).deleted_at == 9 * D
+
+
+def test_refuse_pending_deletes_queued_torrent(env):
+    jobs, lib, qbit, mk = env
+    j = mk(state="pending", hashes=[])
+    lib.queue_hashes = ["Q", "q"]
+    jobs.refuse(jobs.store.get(j.id), qbit)
+    assert qbit.deleted == ["q"] and jobs.store.get(j.id).deleted_at is not None
+
+
+def test_refuse_pending_queue_error_aborts_removal(env, monkeypatch):
+    jobs, lib, qbit, mk = env
+    j = mk(state="pending", hashes=[])
+
+    def boom(self, item):
+        raise RuntimeError("down")
+    monkeypatch.setattr(FakeLibrary, "queue_hashes", boom)
+    jobs.refuse(jobs.store.get(j.id), qbit)
+    assert lib.removed == [] and qbit.deleted == [] and jobs.store.get(j.id).deleted_at is None
+
+
+def test_refuse_pending_protected_keeps_queued_torrent(env):
+    jobs, lib, qbit, mk = env  # the queued download may be A's own
+    j = mk(state="pending", hashes=[], units=("movie:603", "x"), protected=("x",))
+    lib.queue_hashes = ["q"]
+    jobs.refuse(jobs.store.get(j.id), qbit)
+    assert "q" not in qbit.deleted

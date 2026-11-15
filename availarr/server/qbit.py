@@ -36,7 +36,7 @@ def _torrent(x: dict) -> Torrent:
     seeding = x.get("seeding_time")
     if seeding is None and (x.get("completion_on") or 0) > 0:
         seeding = int(time.time()) - x["completion_on"]
-    return Torrent(x["hash"].lower(), x.get("name", ""), x.get("state", ""), float(x.get("progress") or 0), seeding,
+    return Torrent(x["hash"].lower(), x.get("name") or "", x.get("state") or "", float(x.get("progress") or 0), seeding,
                    x.get("upspeed") or 0, x.get("dlspeed") or 0, float(x.get("ratio") or 0),
                    (x.get("num_seeds") or 0) + (x.get("num_leechs") or 0))
 

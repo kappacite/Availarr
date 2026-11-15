@@ -3,6 +3,7 @@ import os
 import threading
 import time
 
+import httpx
 import uvicorn
 from fastapi import FastAPI
 
@@ -30,7 +31,8 @@ def build(cfg, config_path="/config/agent.toml", restart=_restart):
                 server.ping()  # heartbeat: the server's panel shows the agent online even when idle
                 SERVER.update(ok_at=time.time(), error=None)
             except Exception as e:
-                SERVER["error"] = str(e)
+                blocked = isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 403
+                SERVER["error"] = "Bloqué par l'envoyeur" if blocked else str(e)
                 raise
             step(store, server)
         except Exception:

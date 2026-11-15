@@ -115,7 +115,13 @@ def step(store: AgentStore, server: ServerClient) -> None:
             job = store.get(j.nzo_id)
             if job.state not in ("queued", "transferring"):
                 continue
-            st = server.status(job.server_job_id)
+            try:
+                st = server.status(job.server_job_id)
+            except httpx.HTTPStatusError as e:  # 403 is left to retry: blocking is reversible
+                if e.response.status_code != 404:
+                    raise
+                # adopted by another receiver (or gone): B's arr must search elsewhere
+                st = {"state": "failed", "error": "Inconnue chez l'envoyeur"}
             if st["state"] == "failed":
                 job.state, job.fail_message = "failed", st["error"]
             elif st["state"] == "pending":

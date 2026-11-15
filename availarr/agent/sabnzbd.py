@@ -52,7 +52,7 @@ def router(cfg, store, server, b=None) -> APIRouter:
             if b is not None:  # the payload's profile dates from the search: B may have changed it since
                 try:
                     prof = fresh if (fresh := b.b_profile(Item.from_key(item))) != "default" else prof
-                except httpx.HTTPError as e:
+                except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
                     log.warning("B profile re-read failed for %s, keeping %r: %s", item, prof, e)
             sid = server.request(Item.from_key(item), prof, title)
             nzo = "SABnzbd_nzo_" + secrets.token_hex(8)

@@ -101,3 +101,8 @@ def test_info_ignores_bad_hash():
 def test_info_tolerates_nulls():
     t = make([{"hash": H, "progress": None, "completion_on": None, "upspeed": None, "ratio": None, "num_seeds": None}])[0].info([H])[H]
     assert t.seeding is None and t.peers == 0 and t.ratio == 0.0
+
+
+def test_info_null_name_and_state():
+    t = make([{"hash": H, "name": None, "state": None, "progress": 1}])[0].info([H])[H]
+    assert (t.name, t.state) == ("", "")

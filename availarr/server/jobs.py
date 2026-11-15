@@ -25,7 +25,7 @@ class Jobs:
                  qbit=None):
         self.store, self.radarr, self.sonarr, self.cfg, self.clock, self.qbit = store, radarr, sonarr, cfg, clock, qbit
         self.unmapped: set[str] = set()
-        self._lock = threading.Lock()  # ponytail: process-wide lock, fine for one agent
+        self._lock = threading.Lock()  # ponytail: process-wide lock, fine for a handful of agents
         self.transfer: dict[int, tuple[int, int]] = {}  # job id -> (bytes served, total); filled by the API
 
     def lib(self, item: Item) -> Library:

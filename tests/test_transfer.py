@@ -249,3 +249,24 @@ def test_close_retry_error_does_not_abort_step(env, monkeypatch):
     monkeypatch.setattr(env.server, "close", close)
     step(env.store, env.server)
     assert seen == ["delivered", "cancelled"] and not env.job().reported and env.store.get("n2").reported
+
+
+def _status_error(code):
+    def status(job_id):
+        r = httpx.Response(code, request=httpx.Request("GET", "http://x"))
+        raise httpx.HTTPStatusError(str(code), request=r.request, response=r)
+    return status
+
+
+def test_step_unknown_job_fails(env):
+    env.add()
+    env.server.status = _status_error(404)  # adopted by another receiver: B must search elsewhere
+    step(env.store, env.server)
+    assert (env.job().state, env.job().fail_message) == ("failed", "Inconnue chez l'envoyeur")
+
+
+def test_step_blocked_keeps_retrying(env):
+    env.add()
+    env.server.status = _status_error(403)  # blocking is reversible
+    step(env.store, env.server)
+    assert env.job().state == "queued"

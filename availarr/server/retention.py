@@ -72,6 +72,14 @@ def remove_entry(jobs: Jobs, qbit, job: Job, all_jobs: list[Job], now: float) ->
     if not all(o.id == job.id or any(_follows(o, p) for p in judged)
                or _done(jobs.store.get(o.id), qbit, now, cfg.keep_days, cfg.seed_days) for o in judged):
         return False
+    # never ready (still downloading, or refused meanwhile): hashes is empty, the torrent is in the arr's queue.
+    # Not for a protected job: the queued download may be A's own. Arr down: nothing touched, retried later.
+    try:
+        queued = {o.id: [h.lower() for h in jobs.lib(o.item).queue_hashes(o.item)] for o in judged
+                  if o.ready_at is None and o.state in ("pending", "failed") and not o.protected_units}
+    except Exception:
+        log.warning("retention: reading the queue of job %s failed, retried later", job.id, exc_info=True)
+        return False
     fresh = jobs.store.all()  # no network call between this read and remove()
     last = next(o for o in fresh if o.id == job.id)
     covered, keys = _covered(last, fresh)
@@ -82,7 +90,7 @@ def remove_entry(jobs: Jobs, qbit, job: Job, all_jobs: list[Job], now: float) ->
     drop = last.added_by_tool and {u for o in covered for u in o.units} <= set(keys) and not any(
         o.id not in ids and _live(last, o) for o in fresh)
     jobs.lib(last.item).remove(last.item, keys, drop)
-    for h in dict.fromkeys(h for o in covered for h in o.hashes):
+    for h in dict.fromkeys(h for o in covered for h in o.hashes + queued.get(o.id, [])):
         qbit.delete(h)
     for o in covered:  # they all shared these files: gone with them
         jobs.store.set(o.id, deleted_at=now)

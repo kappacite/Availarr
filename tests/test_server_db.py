@@ -79,3 +79,23 @@ def test_ensure_agent_does_not_mark_seen(tmp_path):
     s.ensure_agent("legacy", "Autre")
     a = s.agent("legacy")
     assert a.name == "Agent" and a.last_seen is None and len(s.agents()) == 1
+
+
+def test_adoption_removes_legacy_agent_row(tmp_path):
+    s = JobStore(str(tmp_path / "a.db"))
+    j = s.create(M, "HD", "T", ["movie:603"], [], True, 1.0)
+    s.seen("legacy", "Agent", 5)
+    s.seen("a1", "Lyon", 10)
+    assert [a.id for a in s.agents()] == ["a1"] and s.get(j.id).agent == "a1"
+    s.seen("legacy", "Agent", 20)  # an old agent still connecting: back, with nothing adopted from a1
+    assert {a.id for a in s.agents()} == {"a1", "legacy"} and s.get(j.id).agent == "a1"
+
+
+def test_first_contact_twice_adopts_once(tmp_path):
+    s = JobStore(str(tmp_path / "a.db"))
+    j = s.create(M, "HD", "T", ["movie:603"], [], True, 1.0)
+    s.seen("a1", "Lyon", 10)
+    s.create(M, "HD", "T", ["movie:603"], [], True, 2.0)  # a later legacy job, not to be adopted again
+    a = s.seen("a1", "Lyon", 11)
+    assert (a.first_seen, a.last_seen) == (10, 11) and s.get(j.id).agent == "a1"
+    assert [x.agent for x in s.all()] == ["legacy", "a1"]

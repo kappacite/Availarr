@@ -56,3 +56,19 @@ def test_ensure_identity_writes_uuid(tmp_path):
                  encoding="utf-8")
     fixed = ensure_identity(str(p), load_agent_config(str(p)))
     assert fixed.agent_name and fixed.agent_id == cfg.agent_id and load_agent_config(str(p)).agent_name
+
+
+def test_agent_blocked_shows_clear_error(tmp_path, monkeypatch):
+    import httpx
+
+    from availarr.agent.transfer import SERVER, ServerClient
+    cfg = dataclasses.replace(load_agent_config(str(EX / "agent.toml")), db_path=str(tmp_path / "a.db"),
+                              server_url="http://127.0.0.1:9")
+    _, step_once = agent_main.build(cfg)
+
+    def ping(self):
+        r = httpx.Response(403, request=httpx.Request("GET", "http://s/v1/ping"))
+        raise httpx.HTTPStatusError("403 Forbidden", request=r.request, response=r)
+    monkeypatch.setattr(ServerClient, "ping", ping)
+    step_once()
+    assert SERVER["error"] == "Bloqué par l'envoyeur"

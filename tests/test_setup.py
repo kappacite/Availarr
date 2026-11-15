@@ -163,3 +163,24 @@ def test_config_csrf_guard(tmp_path):
     assert calls == [1]
     r = c.post("/config/test", content="{}", headers={"Origin": "http://testserver", "Content-Type": "text/plain"})
     assert r.status_code == 415
+
+
+def test_agent_config_keeps_agent_id(tmp_path):
+    from fastapi import FastAPI
+
+    from availarr.agent.config import load_agent_config
+    from availarr.setup import config_router
+    d = {"agent_name": "Lyon", "agent_id": "u-1", "admin_password": "pw", "server_url": "http://a", "token": "t",
+         "api_key": "k", "public_url": "http://p", "complete_dir": "/d",
+         "radarr": {"url": "http://r", "key": "rk"}, "sonarr": {"url": "http://s", "key": "sk"}}
+    path = tmp_path / "agent.toml"
+    path.write_text(toml_dump(d), encoding="utf-8")
+    app = FastAPI()
+    app.include_router(config_router("agent", str(path), load_agent_config, lambda: None))
+    c = TestClient(app, headers={"Origin": "http://testserver"})
+    form = {"agent_name": "Lyon", "server_url": "http://a", "token": "t", "api_key": "k", "public_url": "http://p",
+            "complete_dir": "/d", "radarr_url": "http://r", "radarr_key": "rk", "sonarr_url": "http://s",
+            "sonarr_key": "sk"}
+    for posted in ("", "evil"):
+        assert c.post("/config", data={**form, "agent_id": posted}).status_code == 200
+        assert tomllib.loads(path.read_text(encoding="utf-8"))["agent_id"] == "u-1"

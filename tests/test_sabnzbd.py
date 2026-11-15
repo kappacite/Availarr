@@ -198,3 +198,17 @@ def test_addfile_rereads_b_profile(tmp_path):
         TestClient(app).post("/sabnzbd/api", params={"mode": "addfile", "apikey": "key", "cat": "radarr"},
                              files={"name": ("x.nzb", build_nzb(PAYLOAD))})
         assert srv.calls[0][1] == want
+
+
+def test_addfile_b_profile_bad_answer_keeps_payload(tmp_path):
+    for exc in (KeyError("x"), ValueError("x"), TypeError("x")):
+        class B:
+            def b_profile(self, item, exc=exc):
+                raise exc
+        cfg = AgentConfig("http://s", "t", "key", "http://a", str(tmp_path / "done"), "", "", "", "")
+        store, srv = AgentStore(str(tmp_path / f"{type(exc).__name__}.db")), FakeServer()
+        app = FastAPI()
+        app.include_router(router(cfg, store, srv, B()))
+        r = TestClient(app).post("/sabnzbd/api", params={"mode": "addfile", "apikey": "key", "cat": "radarr"},
+                                 files={"name": ("x.nzb", build_nzb(PAYLOAD))})
+        assert r.json()["status"] is True and srv.calls[0][1] == "HD-1080p FR"
