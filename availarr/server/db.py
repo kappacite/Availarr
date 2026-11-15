@@ -169,6 +169,10 @@ class JobStore:
                         c.execute("UPDATE jobs SET agent=? WHERE agent='legacy'", (agent_id,))
                 return _agent(c.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone())
 
+    def ensure_agent(self, id: str, name: str) -> None:
+        """Create the row of an agent known only through its jobs, without marking it seen."""
+        self._run("INSERT OR IGNORE INTO agents (id,name) VALUES (?,?)", (id, name))
+
     def agents(self) -> list[Agent]:
         return [_agent(r) for r in self._run("SELECT * FROM agents ORDER BY first_seen, id")]
 

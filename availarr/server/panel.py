@@ -22,7 +22,7 @@ REFUSED = "Refusée par l'envoyeur"
 POLL_MS = 4000  # ponytail: each poll asks A's Radarr/Sonarr queue per downloading job; fine for a handful
 STATS_POLL_MS = 15000
 AGENT_ONLINE_S = 120  # the agent pings every poll_seconds (30 s by default)
-BACK_OK = re.compile(r"/|/agents/[^/?#]+|/jobs/\d+")
+BACK_OK = re.compile(r"/|/agents/[^/?#\s]+|/jobs/\d+")
 
 
 def fmt_date(ts: float) -> str:
@@ -227,12 +227,12 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         except Exception:  # A's Radarr/Sonarr down: the page must still render
             return []
 
-    def seed(job) -> tuple[str, float | None, bool, str]:
+    def seed(job, info: dict | None = None) -> tuple[str, float | None, bool, str]:
         hashes = torrent_hashes(job)
         if not hashes:
             return "—", None, True, ""
         try:
-            ts = list(qbit.info(hashes).values())
+            ts = list((qbit.info(hashes) if info is None else info).values())
         except Exception:
             return "qBittorrent injoignable", None, False, ""
         secs = [t.seeding for t in ts if t.progress >= 1 and t.seeding is not None]
@@ -352,7 +352,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return '<span class="pill">Bloqué</span>'
         if online(a, now):
             return '<span class="pill p-ok">En ligne</span>'
-        ago = f", vu {fmt_ago(now - a.last_seen)}" if a.last_seen is not None else ""
+        ago = f", vu {fmt_ago(now - a.last_seen)}" if a.last_seen is not None else ", jamais vu"
         return f'<span class="pill p-bad">Hors ligne{ago}</span>'
 
     def visible(agent: str | None = None) -> list:
@@ -414,7 +414,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 f'<nav class="seg" aria-label="Filtres">{seg}</nav></div>{unmapped_banner()}{table}'
                 '<p class="note">Clique sur un titre pour ouvrir le détail de la demande.</p>')
 
-    def steps(job, now: float) -> str:
+    def steps(job, now: float, seed_ok: bool) -> str:
         live = job.deleted_at is None and job.outcome is None
         items = [("ok", "Demandée par le receveur", f"profil {job.b_profile}", fmt_date(job.created_at))]
         if job.state == "failed":
@@ -435,21 +435,21 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         if job.deleted_at is not None:
             items.append(("ok", "Supprimée chez toi", "", fmt_date(job.deleted_at)))
         else:
-            items.append(("", "Suppression chez toi", fmt_removal(job, now, cfg, True), "—"))
+            items.append(("", "Suppression chez toi", fmt_removal(job, now, cfg, seed_ok), "—"))
         return "".join(f'<li class="{c}"><i></i><div>{escape(t)}<br><small>{escape(d)}</small></div>'
                        f'<span class="when">{escape(w)}</span></li>' for c, t, d, w in items)
 
-    def torrents_card(job) -> str:
+    def torrents_card(job) -> tuple[str, bool]:
         head = "<h3>Torrent chez toi</h3>"
         if job.outcome == "cancelled":
-            return f'<div class="card">{head}<p class="note">Demande annulée : données figées, torrent non interrogé.</p></div>'
+            return f'<div class="card">{head}<p class="note">Demande annulée : données figées, torrent non interrogé.</p></div>', True
         hashes = torrent_hashes(job)
         if not hashes:
-            return f'<div class="card">{head}<p class="note">Aucun torrent pour cette demande.</p></div>'
+            return f'<div class="card">{head}<p class="note">Aucun torrent pour cette demande.</p></div>', True
         try:
             ts = qbit.info(hashes)
         except Exception:
-            return f'<div class="card">{head}<p class="note">qBittorrent injoignable</p></div>'
+            return f'<div class="card">{head}<p class="note">qBittorrent injoignable</p></div>', False
         rows = ""
         for h in hashes:
             t = ts.get(h)
@@ -465,10 +465,10 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                      f'<td class="r">{fmt_dh(left) if done and left > 0 else "—"}</td>'
                      f'<td class="r">{fmt_mo(t.upspeed) if t.progress >= 1 else "↓ " + fmt_mo(t.dlspeed)}</td>'
                      f'<td class="r">{f"{t.ratio:.2f}".replace(".", ",")}</td></tr>')
-        txt, pct, _, _ = seed(job)  # ponytail: asks qBittorrent a second time, fine for one detail page
+        txt, pct, ok, _ = seed(job, ts)
         return (f'<div class="card">{head}<table><tr><th>Torrent</th><th>État</th><th class="r">Seed</th>'
                 f'<th class="r">Reste</th><th class="r">Envoi</th><th class="r">Ratio</th></tr>{rows}</table>'
-                f'<div style="margin-top:14px">{bar("seed", "Seed réel", pct, txt, done=pct is not None and pct >= 100)}</div></div>')
+                f'<div style="margin-top:14px">{bar("seed", "Seed réel", pct, txt, done=pct is not None and pct >= 100)}</div></div>', ok)
 
     def files_card(job) -> str:
         files = []
@@ -510,6 +510,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         back = f"/agents/{quote(a.id, safe='')}"
         name, tags = split_title(job.release_title)
         chips = "".join(f'<span class="tag">{escape(t)}</span>' for t in tags)
+        torrents, seed_ok = torrents_card(job)
         acts = buttons(job, "all", f"/jobs/{job.id}")
         note = "<p>Refuser : la demande échoue chez le receveur, qui cherche ailleurs.</p>" if "/refuse?" in acts else ""
         req = jobs.cfg.profiles.get(job.b_profile) or jobs.cfg.profiles.get("default")
@@ -534,8 +535,8 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 f'<div class="big-acts">{acts}{note}</div></div>'
                 '<div class="detail"><div>'
                 f'<div class="card"><h3>Progression</h3>{download_bar(job)}{transfer_bar(job)}'
-                f'<ul class="steps" style="margin-top:18px">{steps(job, now)}</ul></div>'
-                f"{torrents_card(job)}{files_card(job)}{sends_card(job)}</div>"
+                f'<ul class="steps" style="margin-top:18px">{steps(job, now, seed_ok)}</ul></div>'
+                f"{torrents}{files_card(job)}{sends_card(job)}</div>"
                 f'<div class="side"><div class="card"><h3>Demande</h3><dl>{dl}</dl></div>{eps}</div></div>')
 
     def stats_fragment() -> str:
@@ -638,7 +639,9 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
 
     @app.post("/agents/{id}/{action}")
     def agent_act(id: str, action: str, name: str = Form("")):
-        find_agent(id)
+        a = find_agent(id)
+        if jobs.store.agent(id) is None:  # jobs-only agent (legacy never seen): give it a row so the change sticks
+            jobs.store.ensure_agent(id, a.name)
         if action == "rename":
             if name.strip():
                 jobs.store.set_agent(id, name=name.strip(), renamed=1)

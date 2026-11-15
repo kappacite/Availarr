@@ -71,3 +71,11 @@ def test_active_for_is_per_agent(tmp_path):
     s = JobStore(str(tmp_path / "a.db"))
     j = s.create(M, "HD", "T", ["movie:603"], [], True, 1.0, agent="a1")
     assert s.active_for(M, "a1").id == j.id and s.active_for(M, "a2") is None
+
+
+def test_ensure_agent_does_not_mark_seen(tmp_path):
+    s = JobStore(str(tmp_path / "e.db"))
+    s.ensure_agent("legacy", "Agent")
+    s.ensure_agent("legacy", "Autre")
+    a = s.agent("legacy")
+    assert a.name == "Agent" and a.last_seen is None and len(s.agents()) == 1

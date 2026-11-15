@@ -257,7 +257,7 @@ def test_agents_list(env):
     assert "<b>1</b><span>Livrés</span>" in a1 and "Dune Part Two (2024)" in a1
     a2 = t.split('href="/agents/a2"')[1].split("</a>")[0]
     assert "<b>0</b><span>En cours</span>" in a2 and "<b>1</b><span>Livrés</span>" in a2
-    assert c.get("/fragment", auth=AUTH).text.count("agent ") >= 2
+    assert c.get("/fragment", auth=AUTH).text.count('class="card agent') == 2
 
 
 def test_blocked_agent_card(env):
@@ -361,3 +361,50 @@ def test_back_redirect_is_local(env):
     assert loc("/agents/a%2520b") == "/agents/a%20b?f=kept"
     assert loc("/jobs/5") == "/jobs/5?f=kept"
     assert loc("/jobs/x") == "/?f=kept"
+
+
+def test_legacy_only_agent_card(env):
+    jobs, qbit, mk, c = env
+    mk()
+    t = c.get("/", auth=AUTH).text
+    assert "Hors ligne, jamais vu" in t and "Agent" in t and "20000" not in t
+    jobs.store.seen("legacy", "Agent", -30)
+    t = c.get("/", auth=AUTH).text
+    assert ">En ligne<" in t and "jamais vu" not in t
+
+
+def test_actions_on_jobs_only_agent_persist(env):
+    jobs, qbit, mk, c = env
+    mk()
+    assert jobs.store.agent("legacy") is None
+    assert c.post("/agents/legacy/rename", data={"name": "Maison"}, auth=AUTH).status_code == 303
+    a = jobs.store.agent("legacy")
+    assert a.name == "Maison" and a.renamed and a.last_seen is None
+    assert "jamais vu" in c.get("/agents/legacy", auth=AUTH).text
+    c.post("/agents/legacy/block", auth=AUTH)
+    assert jobs.store.agent("legacy").blocked
+
+
+def test_detail_removal_waits_for_seed(env):
+    jobs, qbit, mk, c = env
+    j = mk(decision="delete")
+    qbit.seed["h"] = D
+    assert "⏳ dès 3 j de seed" in c.get(f"/jobs/{j.id}", auth=AUTH).text
+
+
+def test_detail_asks_qbit_once(env):
+    jobs, qbit, mk, c = env
+    j = mk()
+    seen = []
+    orig = qbit.info
+    qbit.info = lambda hs: seen.append(hs) or orig(hs)
+    c.get(f"/jobs/{j.id}", auth=AUTH)
+    assert len(seen) == 1
+
+
+def test_back_to_agent_page(env):
+    jobs, _, mk, c = env
+    j = mk()
+    r = c.post(f"/jobs/{j.id}/keep?f=kept&back=%2Fagents%2Flegacy", auth=AUTH)
+    assert r.headers["location"] == "/agents/legacy?f=kept"
+    assert c.post(f"/jobs/{j.id}/keep?back=%2Fagents%2Fa%20b", auth=AUTH).headers["location"] == "/?f=all"
