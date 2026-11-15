@@ -4,7 +4,7 @@ from availarr.common import Item
 from availarr.server.db import JobStore
 from availarr.server.jobs import Jobs
 from availarr.server.library import Unit
-from availarr.server.retention import seed_ok, seed_seconds, tick
+from availarr.server.retention import remove_entry, seed_ok, seed_seconds, tick
 from tests.fakes import FakeLibrary, FakeQbit, make_cfg
 from tests.test_jobs import Clock, GOOD, M, P
 
@@ -17,8 +17,8 @@ def env(tmp_path):
     jobs = Jobs(JobStore(str(tmp_path / "r.db")), lib, lib, make_cfg(), Clock())
     qbit = FakeQbit({"h": 5 * D})
 
-    def mk(item=M, units=("movie:603",), protected=(), added=True, **kw):
-        j = jobs.store.create(item, P, "t", list(units), list(protected), added, 0)
+    def mk(item=M, units=("movie:603",), protected=(), added=True, agent="legacy", **kw):
+        j = jobs.store.create(item, P, "t", list(units), list(protected), added, 0, agent)
         j.state, j.closed_at, j.hashes = "ready", 0, ["h"]
         for k, v in kw.items():
             setattr(j, k, v)
@@ -194,3 +194,81 @@ def test_requested_again_newest_job_decides(env):
     assert lib.removed == [(M, ["movie:603"], True)]
     assert jobs.store.get(old.id).deleted_at == 37 * D
     assert tick(jobs, qbit, 40 * D) == []
+
+
+def test_two_agents_waits_for_both(env):
+    jobs, lib, qbit, mk = env
+    a1 = mk(agent="a1")
+    a2 = mk(agent="a2", closed_at=None)
+    assert tick(jobs, qbit, 8 * D) == [] and lib.removed == [] and qbit.deleted == []
+    jobs.store.set(a2.id, closed_at=8 * D)
+    assert tick(jobs, qbit, 16 * D) == [a1.id]
+    assert lib.removed == [(M, ["movie:603"], True)]
+    assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 16 * D
+    assert tick(jobs, qbit, 20 * D) == []
+
+
+def test_keep_by_one_agent_protects_entry(env):
+    jobs, lib, qbit, mk = env
+    mk(agent="a1")
+    mk(agent="a2", decision="keep")
+    assert tick(jobs, qbit, 100 * D) == [] and lib.removed == [] and qbit.deleted == []
+
+
+def test_keep_on_older_job_of_same_agent_protects_entry(env):
+    jobs, lib, qbit, mk = env
+    mk(decision="keep")
+    mk()
+    assert tick(jobs, qbit, 100 * D) == [] and lib.removed == []
+
+
+def test_failed_job_of_other_agent_does_not_block(env):
+    jobs, lib, qbit, mk = env
+    a1 = mk(agent="a1")
+    a2 = mk(agent="a2", state="failed", closed_at=None)
+    assert tick(jobs, qbit, 7 * D) == [a1.id]
+    assert lib.removed == [(M, ["movie:603"], True)]
+    assert jobs.store.get(a2.id).deleted_at is None
+
+
+def test_keep_on_other_agent_set_during_tick_is_honoured(env):
+    jobs, lib, qbit, mk = env
+    mk(agent="a1")
+    a2 = mk(agent="a2")
+
+    class FlipQbit(FakeQbit):
+        calls = 0
+
+        def seeding_seconds(self, h):
+            self.calls += 1
+            if self.calls == 3:  # after a2 was judged eligible, before the files go
+                jobs.store.set(a2.id, decision="keep")
+            return 9 * D
+    q = FlipQbit({})
+    assert tick(jobs, q, 100 * D) == [] and lib.removed == [] and q.deleted == []
+
+
+def test_remove_entry_covers_same_item_claimants(env):
+    jobs, lib, qbit, mk = env
+    a1, a2 = mk(agent="a1"), mk(agent="a2", closed_at=None)
+    remove_entry(jobs, qbit, a1, jobs.store.all(), 5)
+    assert lib.removed == [(M, ["movie:603"], True)] and qbit.deleted == ["h"]
+    assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 5
+
+
+def test_first_agent_requested_again_still_removes(env):
+    jobs, lib, qbit, mk = env
+    old1, a2, new1 = mk(agent="a1"), mk(agent="a2"), mk(agent="a1")
+    assert tick(jobs, qbit, 7 * D) == [a2.id]  # a1's newest comes after a2's: a2 is the first head
+    assert lib.removed == [(M, ["movie:603"], True)]
+    assert all(jobs.store.get(j.id).deleted_at == 7 * D for j in (old1, a2, new1))
+
+
+def test_series_jobs_wait_for_each_other_then_go_in_one_tick(env):
+    jobs, lib, qbit, mk = env
+    S, E = Item("season", 5, 1), Item("episode", 5, 2, 3)
+    s = mk(item=S, units=["episode:5:1:1"])
+    e = mk(item=E, units=["episode:5:2:3"], agent="a2", closed_at=7 * D)
+    assert tick(jobs, qbit, 7 * D) == [] and lib.removed == []  # same series: a2 not done yet
+    assert tick(jobs, qbit, 14 * D) == [e.id, s.id]
+    assert lib.removed == [(E, ["episode:5:2:3"], False), (S, ["episode:5:1:1"], True)]
