@@ -180,3 +180,21 @@ def test_cancel_reported_only_when_close_succeeds(tmp_path):
     srv.close = boom
     c.get("/sabnzbd/api", params={"mode": "queue", "name": "delete", "value": "b", "apikey": "key"})
     assert store.get("b").state == "cancelled" and not store.get("b").reported
+
+
+def test_addfile_rereads_b_profile(tmp_path):
+    class B:
+        def __init__(self, prof):
+            self.prof = prof
+
+        def b_profile(self, item):
+            return self.prof
+
+    for prof, want in (("Ultra-HD", "Ultra-HD"), ("default", "HD-1080p FR")):  # gone from B: keep the payload's
+        cfg = AgentConfig("http://s", "t", "key", "http://a", str(tmp_path / "done"), "", "", "", "")
+        store, srv = AgentStore(str(tmp_path / f"{prof}.db")), FakeServer()
+        app = FastAPI()
+        app.include_router(router(cfg, store, srv, B(prof)))
+        TestClient(app).post("/sabnzbd/api", params={"mode": "addfile", "apikey": "key", "cat": "radarr"},
+                             files={"name": ("x.nzb", build_nzb(PAYLOAD))})
+        assert srv.calls[0][1] == want

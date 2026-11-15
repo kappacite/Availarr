@@ -69,11 +69,18 @@ def test_title_and_profile_name():
 
 
 def test_ensure_adds_series_waits_and_searches():
-    eps = iter([[], [], EPS, EPS])
+    status = iter(["queued", "started", "completed"])
+    series = iter([[], [dict(SERIES, monitored=False)]])  # Sonarr v4 unmonitors the series on monitor:none
     s, calls = make({("GET", "/api/v3/series/lookup"): [{"title": "BB", "tvdbId": 81189}],
+                     ("GET", "/api/v3/series"): lambda: next(series),
                      ("GET", "/api/v3/qualityprofile"): PROFILES, ("GET", "/api/v3/tag"): [{"id": 1, "label": "availarr"}],
-                     ("POST", "/api/v3/series"): {"id": 7}, ("GET", "/api/v3/episode"): lambda: next(eps)})
+                     ("POST", "/api/v3/series"): {"id": 7}, ("POST", "/api/v3/command"): {"id": 33},
+                     ("GET", "/api/v3/command/33"): lambda: {"status": next(status)}, ("GET", "/api/v3/episode"): EPS})
     assert s.ensure(SEASON, "HD-1080p FR", True) is True
+    put = next(c for c in calls if c[:2] == ("PUT", "/api/v3/series/7"))
+    # monitoring happens only once Sonarr's refresh is over, or it would undo it
+    assert calls.index(put) > max(i for i, c in enumerate(calls) if c[1] == "/api/v3/command/33")
+    assert put[3]["monitored"] is True
     body = next(c[3] for c in calls if c[:2] == ("POST", "/api/v3/series"))
     assert body["qualityProfileId"] == 4 and body["rootFolderPath"] == "/tv" and body["tags"] == [1]
     assert body["addOptions"] == {"monitor": "none", "searchForMissingEpisodes": False} and body["seasonFolder"] is True
@@ -86,7 +93,9 @@ def test_ensure_adds_series_waits_and_searches():
 
 def test_ensure_wait_times_out():
     s, calls = make({("GET", "/api/v3/series/lookup"): [{"title": "BB"}], ("GET", "/api/v3/qualityprofile"): PROFILES,
-                     ("GET", "/api/v3/tag"): [{"id": 1, "label": "availarr"}], ("POST", "/api/v3/series"): {"id": 7}}, wait_s=4)
+                     ("GET", "/api/v3/tag"): [{"id": 1, "label": "availarr"}], ("POST", "/api/v3/series"): {"id": 7},
+                     ("POST", "/api/v3/command"): {"id": 33}, ("GET", "/api/v3/command/33"): {"status": "started"}},
+                    wait_s=4)
     assert s.ensure(SEASON, "Any", False) is True
     assert s.sleeps == [2, 2] and not any(c[1].endswith("/monitor") for c in calls)
 
@@ -162,6 +171,7 @@ def test_hashes_exclude_torrent_touching_protected_episode():
 def test_ensure_null_language_profile():
     s, calls = make({("GET", "/api/v3/series/lookup"): [{"title": "BB", "languageProfileId": None}],
                      ("GET", "/api/v3/qualityprofile"): PROFILES, ("GET", "/api/v3/tag"): [{"id": 1, "label": "availarr"}],
-                     ("POST", "/api/v3/series"): {"id": 7}, ("GET", "/api/v3/episode"): EPS})
+                     ("POST", "/api/v3/series"): {"id": 7}, ("POST", "/api/v3/command"): {"id": 33},
+                     ("GET", "/api/v3/command/33"): {"status": "completed"}, ("GET", "/api/v3/episode"): EPS})
     s.ensure(SEASON, "Any", False)
     assert next(c[3] for c in calls if c[:2] == ("POST", "/api/v3/series"))["languageProfileId"] == 1

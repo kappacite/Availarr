@@ -48,6 +48,8 @@ def test_lookup_series_synthetic_size(mk):
     units = [Unit(f"episode:1:1:{n}", False, False, None) for n in (1, 2, 3)]
     r = mk(FakeLibrary(units)).lookup(Item("season", 1, 1), P)
     assert r["size"] == 6 * 10**9
+    # series absent on A: one placeholder unit, B's episode count sizes the season pack
+    assert mk(FakeLibrary([Unit("season:1:1", False, False, None)])).lookup(Item("season", 1, 1), P, 10)["size"] == 20 * 10**9
 
 
 def test_lookup_empty_units_returns_none(mk):

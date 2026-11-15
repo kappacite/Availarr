@@ -61,7 +61,7 @@ def router(cfg, server, b) -> APIRouter:
     def release(item: Item) -> list[dict]:
         try:
             prof = b.b_profile(item)
-            found = server.lookup(item, prof)
+            found = server.lookup(item, prof, b.episodes(item))
         except (httpx.HTTPError, ValueError, KeyError) as e:
             log.warning("lookup failed for %s: %s", item.key(), e)
             return []

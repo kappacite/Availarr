@@ -95,14 +95,20 @@ class Sonarr:
                         seasonFolder=True, tags=[self._tag_id()],
                         addOptions={"monitor": "none", "searchForMissingEpisodes": False})
             s = self._req("POST", "/series", json=body)
-            self._req("POST", "/command", json={"name": "RefreshSeries", "seriesId": s["id"]})
+            cmd = self._req("POST", "/command", json={"name": "RefreshSeries", "seriesId": s["id"]})
+            # Sonarr applies monitor:"none" when its refresh ends: monitoring episodes before that gets undone.
             # ponytail: synchronous wait for Sonarr refresh, move to refresh() loop if it times out in practice
             waited = 0.0
-            while not self._eps(s["id"], item) and waited < self.wait_s:
+            while self._req("GET", f"/command/{cmd['id']}").get("status") in ("queued", "started") and waited < self.wait_s:
                 self.sleep(2)
                 waited += 2
+            s = self._series(item) or s
         elif change_profile:
             s["qualityProfileId"] = self._profile_id(profile)
+            s["monitored"] = True
+            self._req("PUT", f"/series/{s['id']}", json=s)
+        if not s.get("monitored"):  # an unmonitored series is never grabbed, even with monitored episodes
+            s["monitored"] = True
             self._req("PUT", f"/series/{s['id']}", json=s)
         ids = [e["id"] for e in self._aired(s["id"], item)]
         if ids:

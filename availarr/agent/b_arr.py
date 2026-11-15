@@ -16,11 +16,25 @@ class BArr:
         r.raise_for_status()
         return r.json()
 
-    def b_profile(self, item: Item) -> str:
+    def _entry(self, item: Item) -> tuple[tuple, dict | None]:
         if item.kind == "movie":
-            conn, found = self.radarr, self._get(self.radarr, "movie", tmdbId=item.ext_id)
+            conn, field, found = self.radarr, "tmdbId", self._get(self.radarr, "movie", tmdbId=item.ext_id)
         else:
-            conn, found = self.sonarr, self._get(self.sonarr, "series", tvdbId=item.ext_id)
-        if not found:
+            conn, field, found = self.sonarr, "tvdbId", self._get(self.sonarr, "series", tvdbId=item.ext_id)
+        # some versions ignore the filter and return the whole library: never trust found[0]
+        return conn, next((e for e in found if e.get(field) == item.ext_id), None)
+
+    def b_profile(self, item: Item) -> str:
+        conn, e = self._entry(item)
+        if e is None:
             return "default"
-        return self._get(conn, f"qualityprofile/{found[0]['qualityProfileId']}")["name"]
+        return self._get(conn, f"qualityprofile/{e['qualityProfileId']}")["name"]
+
+    def episodes(self, item: Item) -> int:
+        """Episodes in B's season: Sonarr checks a season pack's size per episode, so the placeholder must scale."""
+        if item.kind != "season":
+            return 0
+        _, e = self._entry(item)
+        if e is None:
+            return 0
+        return len(self._get(self.sonarr, "episode", seriesId=e["id"], seasonNumber=item.season))

@@ -34,8 +34,8 @@ class ServerClient:
     def ping(self) -> None:
         self._call("GET", "/v1/ping")
 
-    def lookup(self, item: Item | str, b_profile: str) -> dict | None:
-        body = {"item": _key(item), "b_profile": b_profile}
+    def lookup(self, item: Item | str, b_profile: str, episodes: int = 0) -> dict | None:
+        body = {"item": _key(item), "b_profile": b_profile, "episodes": episodes}
         return self._call("POST", "/v1/lookup", json=body).json()["release"]
 
     def request(self, item: Item | str, b_profile: str, title: str) -> int:

@@ -24,7 +24,7 @@ def _hms(seconds: float) -> str:
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
 
 
-def router(cfg, store, server) -> APIRouter:
+def router(cfg, store, server, b=None) -> APIRouter:
     r = APIRouter()
 
     root = os.path.abspath(cfg.complete_dir)
@@ -49,6 +49,11 @@ def router(cfg, store, server) -> APIRouter:
             storage = os.path.join(*[cfg.complete_dir] + ([cat] if cat not in ("", "*") else []) + [title])
             if not inside(storage):
                 raise ValueError("bad storage path")
+            if b is not None:  # the payload's profile dates from the search: B may have changed it since
+                try:
+                    prof = fresh if (fresh := b.b_profile(Item.from_key(item))) != "default" else prof
+                except httpx.HTTPError as e:
+                    log.warning("B profile re-read failed for %s, keeping %r: %s", item, prof, e)
             sid = server.request(Item.from_key(item), prof, title)
             nzo = "SABnzbd_nzo_" + secrets.token_hex(8)
             store.add(AgentJob(nzo, sid, title, cat, "queued", size, 0.0, 0, storage, None, False, time.time()))

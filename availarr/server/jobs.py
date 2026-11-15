@@ -38,7 +38,7 @@ class Jobs:
             self.unmapped.add(b_profile)
         return req
 
-    def lookup(self, item: Item, b_profile: str) -> dict | None:
+    def lookup(self, item: Item, b_profile: str, episodes: int = 0) -> dict | None:
         req = self.requirement(b_profile)
         if req is None:
             log.warning("lookup %s: B profile %r has no [profiles] entry and no 'default'", item.key(), b_profile)
@@ -56,7 +56,7 @@ class Jobs:
             own = original_title(units[0].file, req) if len(units) == 1 else None  # a season pack has many names
             return {"title": own or make_title(name, year, item, file_tags(units[0].file)),
                     "size": sum(u.file.size for u in units)}
-        gb = self.cfg.movie_gb if item.kind == "movie" else self.cfg.episode_gb * len(units)
+        gb = self.cfg.movie_gb if item.kind == "movie" else self.cfg.episode_gb * max(len(units), episodes)
         return {"title": make_title(name, year, item, req.announce), "size": int(gb * 10**9)}
 
     def request(self, item: Item, b_profile: str, release_title: str) -> Job:

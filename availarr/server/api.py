@@ -25,6 +25,10 @@ class RequestIn(LookupIn):
     release_title: str
 
 
+class LookupBody(LookupIn):
+    episodes: int = 0  # episodes in B's season, to size the placeholder
+
+
 class CloseIn(BaseModel):
     outcome: Literal["delivered", "cancelled"]
 
@@ -85,8 +89,8 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
         return {"ok": True}
 
     @app.post("/v1/lookup")
-    def lookup(body: LookupIn):
-        return {"release": jobs.lookup(_item(body.item), body.b_profile)}
+    def lookup(body: LookupBody):
+        return {"release": jobs.lookup(_item(body.item), body.b_profile, body.episodes)}
 
     @app.post("/v1/requests")
     def request(body: RequestIn):

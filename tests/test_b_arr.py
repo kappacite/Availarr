@@ -16,7 +16,11 @@ def _b(movies):
 
 
 def test_b_profile_from_library_and_default():
-    assert _b([{"qualityProfileId": 7}]).b_profile(Item("movie", 603)) == "HD-1080p FR"
+    assert _b([{"tmdbId": 603, "qualityProfileId": 7}]).b_profile(Item("movie", 603)) == "HD-1080p FR"
+    # filter ignored by B's Radarr: the whole library comes back, the right movie must still be picked
+    assert _b([{"tmdbId": 1, "qualityProfileId": 1}, {"tmdbId": 603, "qualityProfileId": 7}]).b_profile(
+        Item("movie", 603)) == "HD-1080p FR"
+    assert _b([{"tmdbId": 1, "qualityProfileId": 1}]).b_profile(Item("movie", 603)) == "default"
     assert _b([]).b_profile(Item("movie", 603)) == "default"
 
 
@@ -25,10 +29,14 @@ def test_series_path_and_non_2xx_raises():
         assert req.headers["X-Api-Key"] == "sk" and req.url.host == "s"
         if req.url.path == "/api/v3/series":
             assert req.url.params["tvdbId"] == "81189"
-            return httpx.Response(200, json=[{"qualityProfileId": 3}])
+            return httpx.Response(200, json=[{"id": 9, "tvdbId": 81189, "qualityProfileId": 3}])
+        if req.url.path == "/api/v3/episode":
+            assert req.url.params["seriesId"] == "9" and req.url.params["seasonNumber"] == "2"
+            return httpx.Response(200, json=[{}] * 8)
         return httpx.Response(200, json={"name": "SD"})
     b = BArr("http://r", "rk", "http://s", "sk", client=httpx.Client(transport=httpx.MockTransport(h)))
     assert b.b_profile(Item("season", 81189, 2)) == "SD"
+    assert b.episodes(Item("season", 81189, 2)) == 8 and b.episodes(Item("episode", 81189, 2, 1)) == 0
     bad = BArr("http://r", "rk", "http://s", "sk",
                client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))))
     with pytest.raises(httpx.HTTPStatusError):

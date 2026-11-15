@@ -18,8 +18,9 @@ class FakeServer:
     def __init__(self, res=None, exc=None):
         self.res, self.exc, self.calls = res, exc, []
 
-    def lookup(self, item, b_profile):
+    def lookup(self, item, b_profile, episodes=0):
         self.calls.append(item)
+        self.episodes = episodes
         if self.exc:
             raise self.exc
         return self.res
@@ -28,6 +29,9 @@ class FakeServer:
 class FakeB:
     def b_profile(self, item):
         return "HD-1080p FR"
+
+    def episodes(self, item):
+        return 10 if item.kind == "season" else 0
 
 
 REL = {"title": "Dune.2024.MULTi.1080p.BluRay-Availarr", "size": 9000}

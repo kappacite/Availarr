@@ -20,7 +20,7 @@ def build(cfg):
     b = BArr(cfg.radarr_url, cfg.radarr_key, cfg.sonarr_url, cfg.sonarr_key)
     app = FastAPI()
     app.include_router(newznab.router(cfg, server, b))
-    app.include_router(sabnzbd.router(cfg, store, server))
+    app.include_router(sabnzbd.router(cfg, store, server, b))
 
     def step_once():
         try:
