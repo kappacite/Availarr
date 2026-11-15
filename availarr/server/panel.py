@@ -12,7 +12,7 @@ from availarr.server import stats
 from availarr.ui import CSS, LOGO
 from availarr.server.config import ServerConfig
 from availarr.server.jobs import Jobs
-from availarr.server.retention import fully_protected, seed_ok, seed_seconds
+from availarr.server.retention import fully_protected
 
 FILTERS = {"all": "Tout", "active": "En cours", "pending": "À décider", "kept": "Gardés", "deleted": "Supprimés"}
 ACTIONS = {"keep": "keep", "delete": "delete", "cancel": "none"}
@@ -29,6 +29,16 @@ def fmt_seed(seconds: int | None, seed_days: float) -> str:
     if seconds >= seed_days * 86400:
         return f"{d} j {h:02d} h ✅"
     return f"{d} j {h:02d} h / {seed_days:g} j"
+
+
+def fmt_seedline(ts, seed_days: float) -> str:
+    if any(t.progress < 1 for t in ts):
+        return f"↓ {fmt_mo(sum(t.dlspeed for t in ts))} · {sum(t.peers for t in ts)} pairs"
+    left = seed_days * 86400 - min(t.seeding or 0 for t in ts)
+    d, h = divmod(int(left), 86400)
+    reste = f"reste {d} j {h // 3600:02d} h · " if left > 0 else ""
+    ratio = f"{min(t.ratio for t in ts):.2f}".replace(".", ",")
+    return f"{reste}↑ {fmt_mo(sum(t.upspeed for t in ts))} · ratio {ratio}"
 
 
 def fmt_removal(job, now: float, cfg: ServerConfig, seed_is_ok: bool) -> str:
@@ -194,17 +204,29 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return bar("tx", label, 0, "Après le téléchargement")
         return bar("tx", label, None, "—")
 
-    def seed(job) -> tuple[str, float | None, bool]:
-        if not job.hashes:
-            return "—", None, True
+    def torrent_hashes(job) -> list[str]:
+        if job.hashes or job.state != "pending":
+            return job.hashes
         try:
-            s = seed_seconds(job, qbit)
-            ok = seed_ok(job, qbit, cfg.seed_days)
+            return jobs.lib(job.item).queue_hashes(job.item)
+        except Exception:  # A's Radarr/Sonarr down: the page must still render
+            return []
+
+    def seed(job) -> tuple[str, float | None, bool, str]:
+        hashes = torrent_hashes(job)
+        if not hashes:
+            return "—", None, True, ""
+        try:
+            ts = list(qbit.info(hashes).values())
         except Exception:
-            return "qBittorrent injoignable", None, False
-        if s is None:
-            return "torrent absent", None, ok
-        return fmt_seed(s, cfg.seed_days), 100 * s / (cfg.seed_days * 86400), ok
+            return "qBittorrent injoignable", None, False, ""
+        secs = [t.seeding for t in ts if t.progress >= 1 and t.seeding is not None]
+        line = fmt_seedline(ts, cfg.seed_days) if ts else ""
+        ok = all(s >= cfg.seed_days * 86400 for s in secs)  # absent or still downloading: nothing blocks yet
+        if not secs:
+            return ("torrent absent" if job.hashes and not ts else "—"), None, ok, line
+        s = min(secs)
+        return fmt_seed(s, cfg.seed_days), 100 * s / (cfg.seed_days * 86400), ok, line
 
     def buttons(job, f: str) -> str:
         def form(act, label, cls=""):
@@ -253,11 +275,13 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         return '<span class="pill p-tx">Prêt à envoyer</span>'
 
     def row(job, now: float, f: str) -> str:
-        seed_txt, seed_pct, ok = seed(job)
+        seed_txt, seed_pct, ok, line = seed(job)
         meta = f"{what(job.item)}, profil {job.b_profile}, demandé {fmt_ago(now - job.created_at)}"
         err = f'<div class="err">Échec : {escape(job.error or "")}</div>' if job.state == "failed" else ""
         seed_html = (bar("seed", "Seed réel", seed_pct, seed_txt, done=seed_pct is not None and seed_pct >= 100)
-                     if job.hashes else bar("seed", "Seed réel", None, seed_txt))
+                     if seed_pct is not None else bar("seed", "Seed réel", None, seed_txt))
+        if line:
+            seed_html += f'<div class="seedline">{escape(line)}</div>'
         dim = " dim" if job.deleted_at is not None or job.state == "failed" else ""
         name, tags = split_title(job.release_title)
         chips = "".join(f'<span class="tag">{escape(t)}</span>' for t in tags)

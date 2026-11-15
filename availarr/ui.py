@@ -65,6 +65,7 @@ border-radius:999px;background:var(--raised);color:var(--text)}
 .run .fill{background-image:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
 background-size:200% 100%;animation:run 1.6s linear infinite}
 @keyframes run{from{background-position:200% 0}to{background-position:-200% 0}}
+.seedline{font-size:12px;color:var(--muted);margin-top:5px}.seedline b{color:var(--text);font-weight:600}
 .rm{font-size:12.5px;margin-top:8px;color:var(--muted)}
 .rm b{color:var(--text);font-weight:600}
 .acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}

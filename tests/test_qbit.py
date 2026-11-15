@@ -79,3 +79,20 @@ def test_live_batches_valid_hashes():
     assert make([])[0].live(["bad"]) == {}
     assert make([{"hash": H, "progress": 0.1, "eta": 8640000}])[0].live([H]) == {H: (0.1, None)}
     assert make([{"hash": H, "progress": 1, "eta": 8640000}])[0].live([H]) == {H: (1.0, 0)}
+
+
+def test_info_fallback_completion_on():
+    import time
+    q, calls = make([{"hash": H.upper(), "name": "n", "state": "stalledUP", "progress": 1, "completion_on": int(time.time()) - 3600,
+                      "upspeed": 5, "dlspeed": 0, "ratio": 0.42, "num_seeds": 2, "num_leechs": 3},
+                     {"hash": "b" * 40, "seeding_time": 9, "completion_on": -1, "progress": 0.5}])
+    t = q.info([H, "b" * 40])
+    assert abs(t[H].seeding - 3600) <= 5 and t[H].peers == 5 and t[H].ratio == 0.42 and t[H].upspeed == 5
+    assert t["b" * 40].seeding == 9
+    assert make([{"hash": H, "progress": 0.1, "completion_on": 0}])[0].info([H])[H].seeding is None
+
+
+def test_info_ignores_bad_hash():
+    q, calls = make([])
+    assert q.info(["all", ""]) == {}
+    assert calls == []

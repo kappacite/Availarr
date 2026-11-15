@@ -128,3 +128,10 @@ def test_progress_prefers_live_qbittorrent():
     def down(hs):
         raise RuntimeError("qbit down")
     assert r.progress(ITEM, down) == 0.5
+
+
+def test_queue_hashes():
+    q = [{"downloadId": "ABC"}, {"downloadId": "abc"}, {}, {"downloadId": "DEF"}]
+    r, _ = make({("GET", "/api/v3/movie"): [MOVIE], ("GET", "/api/v3/queue/details"): q})
+    assert r.queue_hashes(ITEM) == ["abc", "def"]
+    assert make({})[0].queue_hashes(ITEM) == []

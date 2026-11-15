@@ -90,6 +90,13 @@ class Radarr:
             return 0.0
         return queue_progress(self._req("GET", "/queue/details", params={"movieId": m["id"]}), live)
 
+    def queue_hashes(self, item: Item) -> list[str]:
+        m = self._movie(item)
+        if m is None:
+            return []
+        q = self._req("GET", "/queue/details", params={"movieId": m["id"]})
+        return list(dict.fromkeys(e["downloadId"].lower() for e in q if e.get("downloadId")))
+
     def hashes(self, item: Item, since: float, exclude_keys: list[str]) -> list[str]:
         m = self._movie(item)
         if m is None or f"movie:{item.ext_id}" in exclude_keys:  # A's own torrent of a protected movie

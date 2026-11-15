@@ -126,3 +126,22 @@ def test_agent_status(env):
     assert "Agent en ligne" in c.get("/fragment", auth=AUTH).text
     jobs.store.seen("legacy", "Agent", -600)
     assert "Agent hors ligne, vu il y a 10 min" in c.get("/fragment", auth=AUTH).text
+
+
+def test_seed_line_while_downloading(env):
+    from availarr.server.qbit import Torrent
+    jobs, qbit, mk, c = env
+    mk(state="pending", hashes=[])
+    jobs.radarr.queue_hashes = ["h"]
+    qbit.torrents["h"] = Torrent("h", "n", "downloading", 0.4, None, 0, 11_744_051, 0.0, 41)
+    jobs.status = lambda job: {"progress": 0.4}
+    assert "↓ 11,2 Mo/s · 41 pairs" in c.get("/", auth=AUTH).text
+
+
+def test_seed_line_seeding(env):
+    from availarr.server.qbit import Torrent
+    jobs, qbit, mk, c = env
+    mk()
+    qbit.torrents["h"] = Torrent("h", "n", "stalledUP", 1.0, 7 * 3600, 1_887_437, 0, 0.42, 3)
+    t = c.get("/", auth=AUTH).text
+    assert "reste 2 j 17 h" in t and "↑ 1,8 Mo/s" in t and "ratio 0,42" in t

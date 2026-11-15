@@ -126,6 +126,14 @@ class Sonarr:
         q = [e for e in self._req("GET", "/queue/details", params={"seriesId": s["id"]}) if e.get("episodeId") in ids]
         return queue_progress(q, live)
 
+    def queue_hashes(self, item: Item) -> list[str]:
+        s = self._series(item)
+        if s is None:
+            return []
+        ids = {e["id"] for e in self._eps(s["id"], item)}
+        q = [e for e in self._req("GET", "/queue/details", params={"seriesId": s["id"]}) if e.get("episodeId") in ids]
+        return list(dict.fromkeys(e["downloadId"].lower() for e in q if e.get("downloadId")))
+
     def hashes(self, item: Item, since: float, exclude_keys: list[str]) -> list[str]:
         s = self._series(item)
         if s is None:

@@ -1,4 +1,6 @@
 import re
+import time
+from dataclasses import dataclass
 
 import httpx
 
@@ -15,6 +17,28 @@ def _eta(t: dict) -> int | None:
         return 0
     e = t.get("eta")
     return e if isinstance(e, int) and 0 <= e < 8640000 else None  # 8640000 = qBittorrent's "infinity"
+
+
+@dataclass
+class Torrent:
+    hash: str
+    name: str
+    state: str
+    progress: float
+    seeding: int | None
+    upspeed: int
+    dlspeed: int
+    ratio: float
+    peers: int
+
+
+def _torrent(x: dict) -> Torrent:
+    seeding = x.get("seeding_time")
+    if seeding is None and x.get("completion_on", 0) > 0:
+        seeding = int(time.time()) - x["completion_on"]
+    return Torrent(x["hash"].lower(), x.get("name", ""), x.get("state", ""), float(x.get("progress", 0)), seeding,
+                   x.get("upspeed", 0), x.get("dlspeed", 0), float(x.get("ratio", 0)),
+                   x.get("num_seeds", 0) + x.get("num_leechs", 0))
 
 
 class QBit:
@@ -57,6 +81,19 @@ class QBit:
             return {}
         t = self._req("GET", "/torrents/info", params={"hashes": "|".join(dict.fromkeys(ok))}).json()
         return {x["hash"].lower(): (float(x["progress"]), _eta(x)) for x in t if x.get("hash")}
+
+    def info(self, hashes: list[str]) -> dict[str, Torrent]:
+        """hash -> live Torrent, one /torrents/info call; invalid hashes are ignored."""
+        ok = []
+        for h in hashes:
+            try:
+                ok.append(_norm(h))
+            except ValueError:
+                pass
+        if not ok:
+            return {}
+        t = self._req("GET", "/torrents/info", params={"hashes": "|".join(dict.fromkeys(ok))}).json()
+        return {x["hash"].lower(): _torrent(x) for x in t if x.get("hash")}
 
     def delete(self, h: str) -> None:
         h = _norm(h)

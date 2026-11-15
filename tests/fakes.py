@@ -1,4 +1,5 @@
 from availarr.server.config import ServerConfig
+from availarr.server.qbit import Torrent
 from availarr.server.quality import Requirement
 
 
@@ -34,12 +35,13 @@ class _Attr:
 
 
 class FakeLibrary:
-    units, title, progress, hashes = _Attr(), _Attr(), _Attr(), _Attr(list)
+    units, title, progress, hashes, queue_hashes = _Attr(), _Attr(), _Attr(), _Attr(list), _Attr(list)
 
     def __init__(self, units, title=("Dune", 2024), profile=None, progress=0.0, hashes=()):
         self.profile = profile
         self.units = units
         self.title, self.progress, self.hashes = title, progress, hashes
+        self.queue_hashes = []
         self.ensure_calls, self.removed, self.calls = [], [], {}
 
     def profile_name(self, item):
@@ -55,7 +57,16 @@ class FakeLibrary:
 
 class FakeQbit:
     def __init__(self, seed):
-        self.seed, self.deleted = seed, []
+        self.seed, self.deleted, self.torrents = seed, [], {}
+
+    def info(self, hashes):  # explicit Torrents win; otherwise a finished torrent built from the seed dict
+        out = {}
+        for h in hashes:
+            if h in self.torrents:
+                out[h] = self.torrents[h]
+            elif (s := self.seeding_seconds(h)) is not None:
+                out[h] = Torrent(h, "", "stalledUP", 1.0, s, 0, 0, 0.0, 0)
+        return out
 
     def seeding_seconds(self, h):
         return self.seed.get(h)

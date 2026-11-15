@@ -175,3 +175,11 @@ def test_ensure_null_language_profile():
                      ("GET", "/api/v3/command/33"): {"status": "completed"}, ("GET", "/api/v3/episode"): EPS})
     s.ensure(SEASON, "Any", False)
     assert next(c[3] for c in calls if c[:2] == ("POST", "/api/v3/series"))["languageProfileId"] == 1
+
+
+def test_queue_hashes():
+    q = [{"episodeId": 101, "downloadId": "ABC"}, {"episodeId": 102, "downloadId": "abc"},
+         {"episodeId": 999, "downloadId": "OTHER"}]
+    s, _ = make({("GET", "/api/v3/series"): [SERIES], ("GET", "/api/v3/episode"): EPS, ("GET", "/api/v3/queue/details"): q})
+    assert s.queue_hashes(SEASON) == ["abc"]
+    assert make({})[0].queue_hashes(SEASON) == []
