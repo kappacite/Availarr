@@ -119,4 +119,11 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
                 done.append(job.id)
         except Exception:
             log.exception("retention: job %s failed", snap.id)
+    for snap in jobs.store.all():  # refused jobs: retry a failed cleanup, or wait for the agent that blocked it
+        try:
+            job = jobs.store.get(snap.id)
+            if job.error == "Refusée par l'envoyeur" and job.deleted_at is None:
+                remove_entry(jobs, qbit, job, jobs.store.all(), now)
+        except Exception:
+            log.exception("retention: refused job %s failed", snap.id)
     return done

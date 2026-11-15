@@ -261,7 +261,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         if f == "active":
             return active(job)
         if f == "pending":
-            return (job.deleted_at is None and job.decision == "none" and not fully_protected(job)
+            return (job.deleted_at is None and job.outcome != "cancelled" and job.decision == "none" and not fully_protected(job)
                     and job.state in ("pending", "ready"))
         return True
 
@@ -276,8 +276,6 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return '<span class="pill p-bad">Échec</span>'
         if job.outcome == "delivered":
             return '<span class="pill p-ok">Livré</span>'
-        if job.outcome == "cancelled":
-            return '<span class="pill">Annulé chez le receveur</span>'
         if job.state == "pending":
             return '<span class="pill p-dl">Téléchargement</span>'
         if jobs.transfer.get(job.id):
@@ -307,7 +305,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 f'</div></div><div class="acts">{buttons(job, f)}</div></li>')
 
     def summary(all_jobs) -> str:
-        dl = sum(j.state == "pending" and j.deleted_at is None for j in all_jobs)
+        dl = sum(active(j) and j.state == "pending" for j in all_jobs)
         tx = sum(active(j) and j.state == "ready" and bool(jobs.transfer.get(j.id)) for j in all_jobs)
         todo = sum(show(j, "pending") for j in all_jobs)
         if not (dl or tx or todo):

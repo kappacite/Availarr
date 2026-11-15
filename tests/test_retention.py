@@ -367,3 +367,33 @@ def test_remove_entry_removes_a_refused_job(env):
     j = mk(state="failed", closed_at=None)  # Task 5: refused, so it holds no claim, but it is the remover
     assert remove_entry(jobs, qbit, j, jobs.store.all(), 5)
     assert lib.removed == [(M, ["movie:603"], True)] and jobs.store.get(j.id).deleted_at == 5
+
+
+def test_refused_cleanup_retried_by_tick(env):
+    jobs, lib, qbit, mk = env
+    j = mk(state="pending")
+    real = lib.remove
+
+    def boom(*a):
+        raise RuntimeError("down")
+    lib.remove = boom
+    jobs.refuse(jobs.store.get(j.id), qbit)  # must not raise
+    got = jobs.store.get(j.id)
+    assert got.state == "failed" and got.error == "Refusée par l'envoyeur" and got.deleted_at is None
+    lib.remove = real
+    tick(jobs, qbit, 1 * D)
+    assert lib.removed and jobs.store.get(j.id).deleted_at == 1 * D
+
+
+def test_refused_waits_for_other_agent_then_cleans(env):
+    jobs, lib, qbit, mk = env
+    r = mk(agent="a1", state="pending")
+    o = mk(agent="a2", closed_at=None)
+    jobs.refuse(jobs.store.get(r.id), qbit)
+    assert lib.removed == [] and jobs.store.get(r.id).deleted_at is None
+    tick(jobs, qbit, 1 * D)
+    assert lib.removed == [] and jobs.store.get(r.id).deleted_at is None
+    jobs.store.set(o.id, closed_at=1 * D)
+    tick(jobs, qbit, 9 * D)
+    assert lib.removed and jobs.store.get(o.id).deleted_at == 9 * D
+    assert jobs.store.get(r.id).deleted_at == 9 * D

@@ -162,6 +162,9 @@ def test_cancelled_row_is_frozen(env):
     b = mk("Active", state="pending")
     jobs.lib(M).calls.clear()
     jobs.status = lambda job: {"progress": 0.5}
+    seen = []
+    orig = qbit.info
+    qbit.info = lambda hs: seen.append(list(hs)) or orig(hs)
     t = c.get("/fragment", auth=AUTH).text
     rows = t.split('<li class="job')
     ca = next(r for r in rows if "Cancelled" in r)
@@ -169,6 +172,7 @@ def test_cancelled_row_is_frozen(env):
     assert "50 %" not in ca and "50 %" in ac
     assert "Annulé chez le receveur" in ca and "figé, demande annulée" in ca
     assert "Supprimer" in ca and "Retirer" in ca
+    assert len(seen) == 1  # only the active row asked qBittorrent
 
 
 def test_refuse_fails_job_and_removes_entry(env):
@@ -214,3 +218,26 @@ def test_refused_job_blocks_until_retry(env):
     assert jobs.lookup(M, P, agent="legacy") is None
     c.post(f"/jobs/{j.id}/retry", auth=AUTH)
     assert jobs.lookup(M, P, agent="legacy")
+
+
+def test_refuse_failed_job_409(env):
+    jobs, qbit, mk, c = env
+    f = mk(state="failed", error="x")
+    assert c.post(f"/jobs/{f.id}/refuse", auth=AUTH).status_code == 409
+
+
+def test_refuse_cleanup_error_is_not_a_500(env):
+    jobs, qbit, mk, c = env
+    j = mk(state="pending")
+
+    def boom(*a):
+        raise RuntimeError("radarr down")
+    jobs.lib(M).remove = boom
+    assert c.post(f"/jobs/{j.id}/refuse", auth=AUTH).status_code == 303
+    assert jobs.store.get(j.id).error == "Refusée par l'envoyeur"
+
+
+def test_cancelled_not_counted_as_downloading_or_to_decide(env):
+    jobs, qbit, mk, c = env
+    mk(state="pending", outcome="cancelled")
+    assert "Rien en cours" in c.get("/fragment", auth=AUTH).text

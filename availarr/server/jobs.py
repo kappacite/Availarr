@@ -142,15 +142,14 @@ class Jobs:
 
     def refuse(self, job: Job, qbit) -> None:
         """The sender refuses a request: it fails on the receiver's side; files nobody else needs are cleaned."""
-        from availarr.server.retention import _shares_entry, remove_entry  # retention imports Jobs
-        if job.outcome == "delivered" or job.deleted_at is not None:
+        from availarr.server.retention import remove_entry  # retention imports Jobs
+        if job.outcome == "delivered" or job.deleted_at is not None or job.state in ("failed", "retried"):
             raise ValueError("demande déjà livrée ou supprimée")
         self.store.set(job.id, state="failed", error="Refusée par l'envoyeur")
-        others = self.store.all()
-        if job.added_by_tool and not any(
-                o.id != job.id and o.deleted_at is None and _shares_entry(job, o)
-                and o.state in ("pending", "ready") and o.outcome is None for o in others):
-            remove_entry(self, qbit, self.store.get(job.id), others, self.clock())
+        try:  # remove_entry guards overlap and keep itself; tick retries a failed cleanup
+            remove_entry(self, qbit, self.store.get(job.id), self.store.all(), self.clock())
+        except Exception:
+            log.warning("refuse: cleaning job %s failed, retention will retry", job.id, exc_info=True)
 
     def hide(self, job: Job) -> None:
         if job.deleted_at is None and job.outcome is None and job.state in ("pending", "ready"):
