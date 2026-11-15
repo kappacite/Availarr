@@ -7,6 +7,9 @@ complete_dir = "/downloads/complete"
 # db_path = "/data/agent.db"
 # categories = ["radarr", "sonarr", "tv", "movies"]
 # poll_seconds = 30
+agent_name = "my-agent"                        # name shown in the server panel (default: hostname)
+admin_password = "change-me-admin"             # password of the agent UI on :8789 (default: api_key)
+# agent_id is generated automatically at setup or first start; do not copy it between agents
 
 [radarr]   # the receiver's instances
 url = "http://radarr:7878"

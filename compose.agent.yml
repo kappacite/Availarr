@@ -23,7 +23,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     cap_add: [NET_ADMIN, NET_RAW]
     ports:
-      - "8789:8789"   # pour le Radarr/Sonarr du receveur (et la page de première configuration), tout le réseau local
+      - "8789:8789"   # pour le Radarr/Sonarr du receveur (et l'interface de l'agent, protégée par admin_password), tout le réseau local
       - "21641:21641/udp"   # Tailscale (WireGuard), optionnel à rediriger sur la box
     networks:
       default:

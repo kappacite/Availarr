@@ -24,7 +24,8 @@ Pour le Radarr/Sonarr du receveur, Availarr n'est qu'un indexeur et un client de
   - si l'envoyeur a déjà le titre en qualité suffisante (selon `[profiles]`), il le livre tout de suite ;
   - sinon, il l'ajoute dans le Radarr/Sonarr de l'envoyeur (tag `availarr`), attend que qBittorrent l'ait téléchargé, puis le livre.
 - Un transfert interrompu (coupure réseau, redémarrage) reprend là où il s'était arrêté.
-- **Le panel** (port 8788, réservé à l'envoyeur) liste les demandes, leur état, le débit, l'état de l'agent, et permet de garder ou supprimer un titre.
+- **Le panel** (port 8788, réservé à l'envoyeur) liste les agents, leurs demandes, leur état et le débit, donne le détail de chaque demande, et permet de garder, supprimer, refuser ou retirer un titre. Un onglet **Configuration** modifie `server.toml`.
+- **Plusieurs receveurs** peuvent utiliser le même server (voir [Plusieurs receveurs](#plusieurs-receveurs)).
 - Les titres téléchargés **pour** le receveur sont supprimés chez l'envoyeur après un délai (voir [Rétention](#rétention)). Ceux que l'envoyeur possédait déjà ne sont jamais touchés.
 
 ## Prérequis
@@ -159,7 +160,9 @@ Au premier démarrage, sans `config/server.toml`, le server ouvre une **page de 
 1. Saisis le code affiché par `docker compose logs availarr-server`.
 2. **Tailscale** : clique sur **Connecter à Tailscale** et connecte-toi. Le bloc passe à « Connecté » et affiche l'adresse à donner à l'agent, du type `http://100.x.y.z:8787`.
 3. Remplis le formulaire. Les boutons **Tester** vérifient Radarr, Sonarr et qBittorrent et proposent les profils qualité et dossiers racines existants.
-4. Enregistre : `config/server.toml` est écrit et le server démarre. Note le **jeton partagé** affiché en haut, l'agent en a besoin.
+4. Enregistre : `config/server.toml` est écrit et le server démarre. Note le **jeton partagé** affiché en haut, les agents en ont besoin.
+
+Ensuite, l'onglet **Configuration** du panel permet de modifier le fichier : il l'écrit puis redémarre le service (Docker le relance grâce à `restart: unless-stopped`). Un champ mot de passe laissé vide garde la valeur actuelle.
 
 Pour refaire la configuration web : supprime `config/server.toml` et redémarre le conteneur. Tu peux aussi écrire le fichier à la main :
 
@@ -226,6 +229,8 @@ Au premier démarrage, sans `config/agent.toml`, l'agent ouvre une **page de con
 3. Remplis le formulaire : adresse du server (celle affichée par le server, `http://100.x.y.z:8787`) et jeton partagé (**Tester** vérifie les deux), dossier de téléchargement, Radarr/Sonarr du receveur.
 4. Enregistre. Note la **clé API de l'agent** : c'est elle qu'on met dans Radarr/Sonarr du receveur.
 
+À la première configuration (ou au premier démarrage), l'agent génère un identifiant unique `agent_id` (UUID) et prend le nom de la machine comme `agent_name`. Il les envoie à chaque appel : le server enregistre l'agent à sa première connexion.
+
 Ou à la main, `config/agent.toml` :
 
 ```toml
@@ -238,6 +243,9 @@ complete_dir = "/downloads/complete"      # où l'agent écrit les fichiers term
 # db_path = "/data/agent.db"
 # categories = ["radarr", "sonarr", "tv", "movies"]
 # poll_seconds = 30
+agent_name = "Salon"                      # nom affiché dans le panel (défaut : nom de la machine)
+admin_password = "..."                    # mot de passe de l'interface de l'agent (défaut : api_key)
+# agent_id est généré tout seul à la première configuration ou au premier démarrage
 
 [radarr]                                  # instances du receveur
 url = "http://radarr:7878"
@@ -247,6 +255,10 @@ key = "..."
 url = "http://sonarr:8989"
 key = "..."
 ```
+
+### Interface de l'agent
+
+Sur le port 8789 : `/` est la page de téléchargements, `/config` la page de configuration (elle écrit `agent.toml` puis redémarre le service, un champ mot de passe vide garde la valeur actuelle). Elles sont protégées par une authentification HTTP Basic : nom d'utilisateur quelconque, mot de passe `admin_password` (par défaut, la `api_key` de l'agent). Les endpoints `/newznab` et `/sabnzbd` utilisés par Radarr/Sonarr ne changent pas.
 
 ### Radarr et Sonarr du receveur
 
@@ -284,11 +296,26 @@ key = "..."
 
 **Le panel (8788) ne doit jamais être exposé au receveur** ni sur Internet. Seul le port 8787 est destiné à l'agent.
 
+## Plusieurs receveurs
+
+Tous les receveurs utilisent le **même jeton**. Chaque agent a son propre `agent_id` et `agent_name` (dans `agent.toml`) et apparaît dans le panel à sa première connexion.
+
+Dans le panel : **Agents** (liste) > les demandes d'un agent > le détail d'une demande. Sur un agent, **Renommer** change son nom affiché et **Bloquer** refuse tous ses appels à l'API (débloquable).
+
+Sur une demande :
+
+- **Refuser** : la demande échoue chez le receveur, dont Radarr/Sonarr cherchent alors ailleurs. Cet agent ne peut plus redemander ce titre tant que tu n'as pas cliqué **Réessayer**. Les fichiers sont nettoyés quand plus aucun receveur n'en a besoin.
+- **Retirer** : masque du panel une demande terminée. La rétention n'est pas affectée.
+
+Une demande annulée par le receveur est figée dans le panel.
+
+**Mise à jour depuis une version à un seul agent** : un `agent.toml` sans `agent_id` en reçoit un automatiquement. Les anciennes demandes du server sont reprises par le premier agent mis à jour qui se connecte. L'ordre de mise à jour n'a pas d'importance.
+
 ## Rétention
 
 Chaque demande du receveur crée une ligne dans le panel, même pour un titre déjà demandé. La nouvelle ligne reprend l'état de la précédente (protection, torrents, progression) et c'est elle qui décide de la suppression.
 
-Un titre téléchargé par l'envoyeur pour le receveur est supprimé chez l'envoyeur quand **les deux** conditions sont remplies : `keep_days` (7 j) écoulés depuis la clôture (livraison ou annulation), **et** `seed_days` (3 j) de seed réel dans qBittorrent. Le panel affiche le temps restant et le seed.
+Un titre téléchargé par l'envoyeur pour le receveur est supprimé chez l'envoyeur quand **les deux** conditions sont remplies : `keep_days` (7 j) écoulés depuis la clôture (livraison ou annulation), **et** `seed_days` (3 j) de seed réel dans qBittorrent. Les fichiers partagés par plusieurs receveurs sont gardés jusqu'à ce que **tous** ceux qui en ont besoin aient fini. Le panel affiche le temps de seed restant, les débits d'envoi et de téléchargement, le ratio et les pairs (lus dans qBittorrent, avec les identifiants déjà présents dans `server.toml`).
 
 - 🔒 **Protégé** : l'envoyeur possédait déjà le titre, il n'est jamais supprimé.
 - 📌 **Gardé** : l'envoyeur a choisi de le conserver dans le panel.
