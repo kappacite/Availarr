@@ -22,7 +22,7 @@ def test_view_states():
 
 def test_endpoint_needs_code(tmp_path, monkeypatch):
     monkeypatch.setattr(setup, "tailscale_status", lambda: LOGIN)
-    c = TestClient(create_setup("agent", str(tmp_path / "a.toml"), load_agent_config, code="ABC123"))
+    c = TestClient(create_setup("agent", str(tmp_path / "a.toml"), load_agent_config, code="ABC123"), headers={"Origin": "http://testserver"})
     assert "abc" not in c.get("/tailscale", params={"code": "nope"}).text
     assert "login.tailscale.com/a/abc" in c.get("/tailscale", params={"code": "abc123"}).text
     assert 'id="ts"' in c.get("/").text

@@ -12,10 +12,11 @@ import time
 import tomllib
 import uuid
 from html import escape
+from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from availarr.ui import CSS, LOGO
@@ -74,6 +75,15 @@ function addRow(){
   document.getElementById('prows').appendChild(c);
 }
 """
+
+
+def same_origin(request: Request) -> None:
+    """CSRF guard: a state-changing request must come from a page served by this very host (Origin, else Referer)."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    src = request.headers.get("origin") or request.headers.get("referer")
+    if not src or urlsplit(src).netloc != request.headers.get("host"):
+        raise HTTPException(403, "Requête d'une autre origine refusée")
 
 
 def tailscale_ip() -> str | None:
@@ -373,7 +383,7 @@ def create_setup(kind: str, path: str, loader, on_saved=lambda: None, code: str 
     first = {"token": secrets.token_urlsafe(32)} if kind == "server" else {"api_key": secrets.token_urlsafe(24),
                                                                     "agent_id": str(uuid.uuid4())}
     title = "Configuration du server (envoyeur)" if kind == "server" else "Configuration de l'agent (receveur)"
-    app = FastAPI()
+    app = FastAPI(dependencies=[Depends(same_origin)])
 
     def page(values: dict, error: str = "") -> str:
         form = server_form(values) if kind == "server" else agent_form(values)
@@ -472,7 +482,7 @@ def _restart():
 def config_router(kind: str, path: str, loader, restart=_restart, page=None) -> APIRouter:
     """Config page for an already configured service: GET/POST /config and POST /config/test (auth is the caller's)."""
     title = "Configuration"
-    r = APIRouter()
+    r = APIRouter(dependencies=[Depends(same_origin)])
     password_keys = ("admin_password", "qbit_pass") if kind == "server" else ("admin_password",)
 
     def default_page(t: str, inner: str) -> str:
@@ -504,6 +514,8 @@ def config_router(kind: str, path: str, loader, restart=_restart, page=None) -> 
 
     @r.post("/config/test")
     async def test(request: Request):
+        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+            raise HTTPException(415)
         f = await request.json()
         return check(f.get("kind", ""), f)
 

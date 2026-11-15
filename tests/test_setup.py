@@ -26,7 +26,7 @@ SERVER_FORM = {
 
 def test_server_setup_writes_valid_config(tmp_path):
     path, saved = tmp_path / "cfg" / "server.toml", []
-    c = TestClient(create_setup("server", str(path), load_server_config, lambda: saved.append(1), code="ABC123"))
+    c = TestClient(create_setup("server", str(path), load_server_config, lambda: saved.append(1), code="ABC123"), headers={"Origin": "http://testserver"})
     page = c.get("/").text
     assert "Configuration du server" in page and 'name="token"' in page
     assert c.post("/save", data={**SERVER_FORM, "setup_code": "nope"}).status_code == 403 and not path.exists()
@@ -40,7 +40,7 @@ def test_server_setup_writes_valid_config(tmp_path):
 
 def test_agent_setup_and_test_endpoint_needs_code(tmp_path):
     path = tmp_path / "agent.toml"
-    c = TestClient(create_setup("agent", str(path), load_agent_config, code="ABC123"))
+    c = TestClient(create_setup("agent", str(path), load_agent_config, code="ABC123"), headers={"Origin": "http://testserver"})
     assert c.post("/test", json={"kind": "server", "code": "x", "url": "http://a"}).json()["msg"].startswith("Code")
     assert "http://" in c.post("/test", json={"kind": "server", "code": "abc123", "url": "ftp://a"}).json()["msg"]
     r = c.post("/save", data={"setup_code": "ABC123", "server_url": "http://a:8787", "token": "t", "api_key": "k",
@@ -79,7 +79,7 @@ def test_tailscale_ip(monkeypatch):
 
 def test_agent_setup_writes_identity(tmp_path):
     path = tmp_path / "agent.toml"
-    c = TestClient(create_setup("agent", str(path), load_agent_config, code="ABC123"))
+    c = TestClient(create_setup("agent", str(path), load_agent_config, code="ABC123"), headers={"Origin": "http://testserver"})
     assert 'name="agent_id"' in c.get("/").text
     r = c.post("/save", data={"setup_code": "ABC123", "agent_name": "Lyon", "agent_id": "u-1", "admin_password": "pw",
                               "server_url": "http://a:8787", "token": "t", "api_key": "k",
@@ -101,7 +101,7 @@ def _cfg_env(tmp_path, kind="server"):
     calls = []
     app = FastAPI()
     app.include_router(config_router("server", str(path), load_server_config, lambda: calls.append(1)))
-    return path, calls, TestClient(app), form, form_values
+    return path, calls, TestClient(app, headers={"Origin": "http://testserver"}), form, form_values
 
 
 def test_form_values_roundtrip(tmp_path):
@@ -149,3 +149,17 @@ def test_config_invalid_not_written(tmp_path):
     before = path.read_text(encoding="utf-8")
     r = c.post("/config", data={**SERVER_FORM, "token": ""})
     assert r.status_code == 400 and path.read_text(encoding="utf-8") == before and calls == []
+
+
+def test_config_csrf_guard(tmp_path):
+    path, calls, c, _, _ = _cfg_env(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    body = {**SERVER_FORM, "qbit_url": "http://evil", "qbit_pass": ""}
+    c.headers.pop("origin")
+    for h in ({"Origin": "http://evil"}, {"Referer": "http://evil/x"}, {}):
+        assert c.post("/config", data=body, headers=h).status_code == 403
+    assert path.read_text(encoding="utf-8") == before and calls == []
+    assert c.post("/config", data=body, headers={"Referer": "http://testserver/config"}).status_code == 200
+    assert calls == [1]
+    r = c.post("/config/test", content="{}", headers={"Origin": "http://testserver", "Content-Type": "text/plain"})
+    assert r.status_code == 415

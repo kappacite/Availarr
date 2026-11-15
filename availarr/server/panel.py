@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from availarr.server import stats
-from availarr.setup import SETUP_CSS, SETUP_JS, _restart as default_restart, config_router
+from availarr.setup import SETUP_CSS, SETUP_JS, same_origin, _restart as default_restart, config_router
 from availarr.ui import CSS, LOGO
 from availarr.server.config import ServerConfig, load_server_config
 from availarr.server.db import Agent
@@ -158,7 +158,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
         if not secrets.compare_digest(c.password.encode(), cfg.admin_password.encode()):
             raise HTTPException(401, headers={"WWW-Authenticate": "Basic"})
 
-    app = FastAPI(dependencies=[Depends(auth)])
+    app = FastAPI(dependencies=[Depends(auth), Depends(same_origin)])
 
     def rate(job_id: int, pos: int) -> float:
         now = time.monotonic()

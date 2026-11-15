@@ -32,7 +32,7 @@ def env(tmp_path):
         jobs.store.update(j)
         jobs.store.set(j.id, **{k: getattr(j, k) for k in ("decision", "closed_at", "outcome", "deleted_at")})
         return jobs.store.get(j.id)
-    return jobs, qbit, mk, TestClient(create_panel(jobs, qbit, jobs.cfg, lambda: 0), follow_redirects=False)
+    return jobs, qbit, mk, TestClient(create_panel(jobs, qbit, jobs.cfg, lambda: 0), follow_redirects=False, headers={"Origin": "http://testserver"})
 
 
 def test_requires_password(env):
@@ -420,7 +420,7 @@ def test_config_tab_and_auth(tmp_path):
     cfg = jobs.cfg
     plain = TestClient(create_panel(jobs, FakeQbit({}), cfg, lambda: 0))
     assert "/config" not in plain.get("/", auth=("u", cfg.admin_password)).text
-    c = TestClient(create_panel(jobs, FakeQbit({}), cfg, lambda: 0, config_path=str(cfg_file), restart=lambda: None))
+    c = TestClient(create_panel(jobs, FakeQbit({}), cfg, lambda: 0, config_path=str(cfg_file), restart=lambda: None), headers={"Origin": "http://testserver"})
     assert c.get("/config").status_code == 401
     assert c.post("/config/test", json={"kind": "server"}).status_code == 401
     auth = ("u", cfg.admin_password)
@@ -428,3 +428,10 @@ def test_config_tab_and_auth(tmp_path):
     page = c.get("/config", auth=auth).text
     assert "Enregistrer et redémarrer" in page and 'aria-current=page>Configuration' in page
     assert c.post("/config/test", json={"kind": "x", "url": "ftp://a"}, auth=auth).json()["ok"] is False
+
+
+def test_panel_action_cross_site_403(env):
+    jobs, _, mk, c = env
+    j = mk()
+    assert c.post(f"/jobs/{j.id}/keep", headers={"Origin": "http://evil"}, auth=("u", jobs.cfg.admin_password)).status_code == 403
+    assert jobs.store.get(j.id).decision == "none"
