@@ -153,3 +153,64 @@ def test_removal_waits_while_still_downloading(env):
     mk(decision="delete")
     qbit.torrents["h"] = Torrent("h", "n", "downloading", 0.4, None, 0, 1, 0.0, 1)
     assert "⏳ dès 3 j de seed" in c.get("/", auth=AUTH).text
+
+
+def test_cancelled_row_is_frozen(env):
+    jobs, qbit, mk, c = env
+    jobs.lib(M).progress = 0.5
+    a = mk("Cancelled", state="pending", outcome="cancelled")
+    b = mk("Active", state="pending")
+    jobs.lib(M).calls.clear()
+    jobs.status = lambda job: {"progress": 0.5}
+    t = c.get("/fragment", auth=AUTH).text
+    rows = t.split('<li class="job')
+    ca = next(r for r in rows if "Cancelled" in r)
+    ac = next(r for r in rows if "Active" in r)
+    assert "50 %" not in ca and "50 %" in ac
+    assert "Annulé chez le receveur" in ca and "figé, demande annulée" in ca
+    assert "Supprimer" in ca and "Retirer" in ca
+
+
+def test_refuse_fails_job_and_removes_entry(env):
+    jobs, qbit, mk, c = env
+    j = mk(state="pending")
+    assert c.post(f"/jobs/{j.id}/refuse", auth=AUTH).status_code == 303
+    j = jobs.store.get(j.id)
+    assert (j.state, j.error) == ("failed", "Refusée par l'envoyeur")
+    assert jobs.lib(M).removed
+    t = c.get("/fragment", auth=AUTH).text
+    assert "Refusée" in t and "Réessayer" in t and "Retirer" in t
+
+
+def test_refuse_shared_entry_keeps_files(env):
+    jobs, qbit, mk, c = env
+    j = mk(state="pending")
+    o = jobs.store.create(M, P, "o", ["movie:603"], [], True, 0, "a2")
+    jobs.store.set(o.id, state="pending")
+    assert c.post(f"/jobs/{j.id}/refuse", auth=AUTH).status_code == 303
+    assert jobs.lib(M).removed == []
+
+
+def test_refuse_delivered_409(env):
+    jobs, qbit, mk, c = env
+    j = mk(outcome="delivered")
+    assert c.post(f"/jobs/{j.id}/refuse", auth=AUTH).status_code == 409
+
+
+def test_hide_only_when_finished(env):
+    jobs, qbit, mk, c = env
+    a = mk("Live", state="pending")
+    d = mk("Done", outcome="delivered")
+    assert c.post(f"/jobs/{a.id}/hide", auth=AUTH).status_code == 409
+    assert c.post(f"/jobs/{d.id}/hide", auth=AUTH).status_code == 303
+    t = c.get("/fragment", auth=AUTH).text
+    assert "Live" in t and "Done" not in t
+
+
+def test_refused_job_blocks_until_retry(env):
+    jobs, qbit, mk, c = env
+    j = mk(state="pending")
+    c.post(f"/jobs/{j.id}/refuse", auth=AUTH)
+    assert jobs.lookup(M, P, agent="legacy") is None
+    c.post(f"/jobs/{j.id}/retry", auth=AUTH)
+    assert jobs.lookup(M, P, agent="legacy")

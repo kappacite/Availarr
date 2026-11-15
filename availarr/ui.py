@@ -74,6 +74,7 @@ button{font:500 13px var(--sans);color:var(--text);background:var(--raised);bord
 border-radius:8px;padding:6px 13px;cursor:pointer}
 button:hover{border-color:var(--muted)}
 button.del{color:#f2a0a6}
+button.ghost{background:transparent}
 .empty{color:var(--muted);padding:56px 24px;text-align:center;margin:0}
 .figs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
 .fig{padding:22px 24px;border-left:1px solid var(--line)}

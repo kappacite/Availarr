@@ -140,6 +140,23 @@ class Jobs:
             raise IndexError(index)
         return files[index].path, files[index].size
 
+    def refuse(self, job: Job, qbit) -> None:
+        """The sender refuses a request: it fails on the receiver's side; files nobody else needs are cleaned."""
+        from availarr.server.retention import _shares_entry, remove_entry  # retention imports Jobs
+        if job.outcome == "delivered" or job.deleted_at is not None:
+            raise ValueError("demande déjà livrée ou supprimée")
+        self.store.set(job.id, state="failed", error="Refusée par l'envoyeur")
+        others = self.store.all()
+        if job.added_by_tool and not any(
+                o.id != job.id and o.deleted_at is None and _shares_entry(job, o)
+                and o.state in ("pending", "ready") and o.outcome is None for o in others):
+            remove_entry(self, qbit, self.store.get(job.id), others, self.clock())
+
+    def hide(self, job: Job) -> None:
+        if job.deleted_at is None and job.outcome is None and job.state in ("pending", "ready"):
+            raise ValueError("demande encore active")
+        self.store.set(job.id, hidden_at=self.clock())
+
     def close(self, job: Job, outcome: str) -> None:
         job.outcome, job.closed_at = outcome, self.clock()
         self.store.set(job.id, outcome=job.outcome, closed_at=job.closed_at)

@@ -16,6 +16,7 @@ from availarr.server.retention import fully_protected
 
 FILTERS = {"all": "Tout", "active": "En cours", "pending": "À décider", "kept": "Gardés", "deleted": "Supprimés"}
 ACTIONS = {"keep": "keep", "delete": "delete", "cancel": "none"}
+REFUSED = "Refusée par l'envoyeur"
 POLL_MS = 4000  # ponytail: each poll asks A's Radarr/Sonarr queue per downloading job; fine for a handful
 STATS_POLL_MS = 15000
 AGENT_ONLINE_S = 120  # the agent pings every poll_seconds (30 s by default)
@@ -169,6 +170,8 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
 
     def download_bar(job) -> str:
         label = "Téléchargement chez toi"
+        if job.outcome == "cancelled":
+            return bar("dl", label, None, "Annulé chez le receveur")
         if fully_protected(job) and not job.hashes and job.state == "ready":
             return bar("dl", label, 100, "Déjà chez toi", done=True)
         if job.state == "pending":
@@ -232,15 +235,20 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         def form(act, label, cls=""):
             c = f' class="{cls}"' if cls else ""
             return f'<form method="post" action="/jobs/{job.id}/{act}?f={f}"><button{c}>{label}</button></form>'
+        hide = form("hide", "Retirer", "ghost")
         if job.state == "failed":
-            return form("retry", "Réessayer")
-        if job.deleted_at is not None:
-            return ""
+            return form("retry", "Réessayer") + hide
+        if job.outcome == "cancelled":
+            return (form("delete", "Supprimer", "del") if job.deleted_at is None and job.decision == "none" else "") + hide
+        if job.deleted_at is not None or job.outcome == "delivered":
+            return hide
         if fully_protected(job) and job.decision != "keep":
-            return ""
-        if job.decision == "none":
-            return form("keep", "Garder") + form("delete", "Supprimer", "del")
-        return form("cancel", "Annuler la décision")
+            base = ""
+        elif job.decision == "none":
+            base = form("keep", "Garder") + form("delete", "Supprimer", "del")
+        else:
+            base = form("cancel", "Annuler la décision")
+        return base + form("refuse", "Refuser", "ghost" if base else "del")
 
     def active(job) -> bool:
         return job.deleted_at is None and job.outcome is None and job.state in ("pending", "ready")
@@ -258,6 +266,10 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         return True
 
     def pill(job) -> str:
+        if job.error == REFUSED:
+            return '<span class="pill p-bad">Refusée</span>'
+        if job.outcome == "cancelled":
+            return '<span class="pill">Annulé chez le receveur</span>'
         if job.deleted_at is not None:
             return '<span class="pill">Supprimé</span>'
         if job.state == "failed":
@@ -275,14 +287,17 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         return '<span class="pill p-tx">Prêt à envoyer</span>'
 
     def row(job, now: float, f: str) -> str:
-        seed_txt, seed_pct, ok, line = seed(job)
+        if job.outcome == "cancelled":
+            seed_txt, seed_pct, ok, line = "figé, demande annulée", None, True, ""
+        else:
+            seed_txt, seed_pct, ok, line = seed(job)
         meta = f"{what(job.item)}, profil {job.b_profile}, demandé {fmt_ago(now - job.created_at)}"
         err = f'<div class="err">Échec : {escape(job.error or "")}</div>' if job.state == "failed" else ""
         seed_html = (bar("seed", "Seed réel", seed_pct, seed_txt, done=seed_pct is not None and seed_pct >= 100)
                      if seed_pct is not None else bar("seed", "Seed réel", None, seed_txt))
         if line:
             seed_html += f'<div class="seedline">{line}</div>'
-        dim = " dim" if job.deleted_at is not None or job.state == "failed" else ""
+        dim = " dim" if job.deleted_at is not None or job.state == "failed" or job.outcome == "cancelled" else ""
         name, tags = split_title(job.release_title)
         chips = "".join(f'<span class="tag">{escape(t)}</span>' for t in tags)
         return (f'<li class="job{dim}"><div><div class="t" title="{escape(job.release_title)}">{escape(name)}</div>'
@@ -314,7 +329,8 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
 
     def requests_fragment(f: str) -> str:
         f = f if f in FILTERS else "all"
-        now, all_jobs = clock(), sorted(jobs.store.all(), key=lambda j: j.created_at, reverse=True)
+        now = clock()
+        all_jobs = sorted((j for j in jobs.store.all() if j.hidden_at is None), key=lambda j: j.created_at, reverse=True)
         banner = (f'<p class="warn">Profils du receveur sans correspondance dans [profiles] : '
                   f'{escape(", ".join(sorted(jobs.unmapped)))}</p>') if jobs.unmapped else ""
         seg = "".join(f'<a href="/?f={k}"{" class=on" if k == f else ""}>{v}'
@@ -428,9 +444,14 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
     @app.post("/jobs/{id}/{action}")
     def act(id: int, action: str, f: str = "all"):
         job = jobs.store.get(id)
-        if job is None or action not in (*ACTIONS, "retry"):
+        if job is None or action not in (*ACTIONS, "retry", "refuse", "hide"):
             raise HTTPException(404)
-        if action == "retry":
+        if action in ("refuse", "hide"):
+            try:
+                jobs.refuse(job, qbit) if action == "refuse" else jobs.hide(job)
+            except ValueError:
+                raise HTTPException(409)
+        elif action == "retry":
             if job.state != "failed":
                 raise HTTPException(409)
             jobs.store.set(id, state="retried")
