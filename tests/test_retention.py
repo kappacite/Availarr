@@ -99,7 +99,7 @@ def test_drop_entry_false_when_not_added_or_shared(env):
     mk(item=Item("season", 5, 1), units=["episode:5:1:1"])
     mk(item=Item("episode", 5, 1, 2), units=["episode:5:1:2"], closed_at=7 * D)  # same series, still active
     tick(jobs, qbit, 7 * D)
-    assert lib.removed[-1][2] is False
+    assert lib.removed[-1] == (Item("season", 5, 1), ["episode:5:1:1"], False)
 
 
 def test_failure_does_not_stop_other_jobs(env):
@@ -264,11 +264,49 @@ def test_first_agent_requested_again_still_removes(env):
     assert all(jobs.store.get(j.id).deleted_at == 7 * D for j in (old1, a2, new1))
 
 
-def test_series_jobs_wait_for_each_other_then_go_in_one_tick(env):
+def test_other_season_pending_does_not_block(env):
     jobs, lib, qbit, mk = env
-    S, E = Item("season", 5, 1), Item("episode", 5, 2, 3)
-    s = mk(item=S, units=["episode:5:1:1"])
-    e = mk(item=E, units=["episode:5:2:3"], agent="a2", closed_at=7 * D)
-    assert tick(jobs, qbit, 7 * D) == [] and lib.removed == []  # same series: a2 not done yet
-    assert tick(jobs, qbit, 14 * D) == [e.id, s.id]
-    assert lib.removed == [(E, ["episode:5:2:3"], False), (S, ["episode:5:1:1"], True)]
+    S1, S2 = Item("season", 5, 1), Item("season", 5, 2)
+    s1 = mk(item=S1, units=["episode:5:1:1"])
+    mk(item=S2, units=["episode:5:2:1"], agent="a2", state="pending", closed_at=None)
+    assert tick(jobs, qbit, 7 * D) == [s1.id]
+    assert lib.removed == [(S1, ["episode:5:1:1"], False)]  # S2 still holds the series entry
+
+
+def test_keep_on_other_season_does_not_keep_this_one(env):
+    jobs, lib, qbit, mk = env
+    S1, S2 = Item("season", 5, 1), Item("season", 5, 2)
+    s1 = mk(item=S1, units=["episode:5:1:1"])
+    mk(item=S2, units=["episode:5:2:1"], agent="a2", decision="keep")
+    assert tick(jobs, qbit, 7 * D) == [s1.id]
+
+
+def test_overlapping_episode_job_blocks_season(env):
+    jobs, lib, qbit, mk = env
+    S, E = Item("season", 5, 1), Item("episode", 5, 1, 2)
+    s = mk(item=S, units=["episode:5:1:1", "episode:5:1:2"])
+    e = mk(item=E, units=["episode:5:1:2"], protected=["episode:5:1:2"], agent="a2", closed_at=7 * D)
+    assert tick(jobs, qbit, 7 * D) == [] and lib.removed == []
+    assert tick(jobs, qbit, 14 * D) == [s.id]
+    assert lib.removed == [(S, ["episode:5:1:1", "episode:5:1:2"], True)]  # e is covered: nothing else holds the series
+    assert jobs.store.get(e.id).deleted_at == 14 * D
+
+
+def test_fully_protected_other_agent_waits_then_goes(env):
+    jobs, lib, qbit, mk = env
+    a1 = mk(agent="a1")
+    a2 = mk(agent="a2", protected=["movie:603"], closed_at=None)  # asked while a1's download was pending
+    assert tick(jobs, qbit, 8 * D) == [] and lib.removed == []
+    jobs.store.set(a2.id, closed_at=8 * D)
+    assert tick(jobs, qbit, 15 * D) == [a1.id]
+    assert lib.removed == [(M, ["movie:603"], True)]
+    assert jobs.store.get(a1.id).deleted_at == jobs.store.get(a2.id).deleted_at == 15 * D
+
+
+def test_torrents_of_all_covered_jobs_deleted(env):
+    jobs, lib, qbit, mk = env
+    a1 = mk(agent="a1")
+    mk(agent="a2", hashes=["h", "h2"])
+    qbit.seed["h2"] = 5 * D
+    assert tick(jobs, qbit, 7 * D) == [a1.id]
+    assert qbit.deleted == ["h", "h2"]
