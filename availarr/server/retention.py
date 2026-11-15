@@ -46,22 +46,30 @@ def _live(job: Job, o: Job) -> bool:
     return o.deleted_at is None and o.state not in ("failed", "retried") and _shares_entry(job, o)
 
 
-def _claims(job: Job, o: Job) -> bool:  # o needs some of the files job would delete
-    return _live(job, o) and not set(o.units).isdisjoint(_keys(job))
-
-
 def _follows(o: Job, job: Job) -> bool:  # an older request of the same agent for the same item: the newest decides
     return o.agent == job.agent and o.item == job.item and o.id < job.id
 
 
+def _covered(job: Job, all_jobs: list[Job]) -> tuple[list[Job], list[str]]:
+    """job, its older requests and, transitively, every job needing a file one of them would delete;
+    with the units they delete together (a unit goes if one of them caused it)."""
+    covered = {job.id: job} | {o.id: o for o in all_jobs if o.deleted_at is None and _follows(o, job)}
+    while True:
+        keys = list(dict.fromkeys(u for o in covered.values() for u in _keys(o)))
+        more = {o.id: o for o in all_jobs
+                if o.id not in covered and _live(job, o) and not set(o.units).isdisjoint(keys)}
+        if not more:
+            return list(covered.values()), keys
+        covered |= more
+
+
 def remove_entry(jobs: Jobs, qbit, job: Job, all_jobs: list[Job], now: float) -> None:
-    covered = [o for o in all_jobs if o.id == job.id or (
-        o.deleted_at is None and (_follows(o, job) or _claims(job, o)))]
+    covered, keys = _covered(job, all_jobs)
     ids = {o.id for o in covered}
     # a partly protected entry must never be dropped: Sonarr would delete the protected episodes too
-    drop = job.added_by_tool and not job.protected_units and not any(
+    drop = job.added_by_tool and {u for o in covered for u in o.units} <= set(keys) and not any(
         o.id not in ids and _live(job, o) for o in all_jobs)
-    jobs.lib(job.item).remove(job.item, _keys(job), drop)
+    jobs.lib(job.item).remove(job.item, keys, drop)
     for h in dict.fromkeys(h for o in covered for h in o.hashes):
         qbit.delete(h)
     for o in covered:  # they all shared these files: gone with them
@@ -84,7 +92,7 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
             if not _eligible(job, qbit, now, cfg.keep_days, cfg.seed_days):
                 continue
             # read again: a job removed earlier in this tick no longer claims anything
-            claimants = [o for o in jobs.store.all() if o.id != job.id and _claims(job, o)]
+            claimants = [o for o in _covered(job, jobs.store.all())[0] if o.id != job.id]
             # one remover per item: each agent's newest job decides for its older ones (requested again), and
             # among agents the first one removes, its job being the one that added and fetched the files
             # (a fully protected job never removes: it didn't fetch anything)
@@ -101,8 +109,8 @@ def tick(jobs: Jobs, qbit, now: float) -> list[int]:
             fresh = jobs.store.all()  # no network call between this read and remove()
             ok = {job.id} | {o.id for o in claimants}
             last = next(o for o in fresh if o.id == job.id)
-            if last.decision == "keep" or last.deleted_at is not None or any(
-                    o.id not in ok or o.decision == "keep" for o in fresh if _claims(last, o)):
+            if last.deleted_at is not None or any(
+                    o.id not in ok or o.decision == "keep" for o in _covered(last, fresh)[0]):
                 continue
             remove_entry(jobs, qbit, last, fresh, now)
             done.append(job.id)
