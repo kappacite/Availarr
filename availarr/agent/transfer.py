@@ -2,6 +2,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from urllib.parse import quote
 from typing import Callable
 
 import httpx
@@ -29,7 +30,7 @@ class ServerClient:
         self.client = client or httpx.Client(base_url=base_url, timeout=httpx.Timeout(60, connect=30))
         self.headers = {"Authorization": f"Bearer {token}"}
         if agent_id:
-            self.headers |= {"X-Availarr-Agent": agent_id, "X-Availarr-Agent-Name": agent_name}
+            self.headers |= {"X-Availarr-Agent": agent_id, "X-Availarr-Agent-Name": quote(agent_name)}
 
     def _call(self, method: str, path: str, **kw) -> httpx.Response:
         r = self.client.request(method, path, headers=self.headers, **kw)

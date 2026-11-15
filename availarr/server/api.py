@@ -4,6 +4,7 @@ import re
 import secrets
 import time
 from typing import Iterator, Literal
+from urllib.parse import unquote
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
@@ -76,7 +77,7 @@ def create_api(jobs: Jobs, cfg: ServerConfig) -> FastAPI:
              name: str = Header("Agent", alias="X-Availarr-Agent-Name")) -> str:
         if not secrets.compare_digest(authorization.encode(), f"Bearer {cfg.token}".encode()):
             raise HTTPException(401, "bad token")
-        if jobs.store.seen(agent, name, time.time()).blocked:  # also feeds the panel's online status
+        if jobs.store.seen(agent, unquote(name), time.time()).blocked:  # also feeds the panel's online status
             raise HTTPException(403, "agent blocked")
         return agent
 

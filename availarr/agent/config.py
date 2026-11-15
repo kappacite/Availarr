@@ -1,4 +1,6 @@
+import os
 import socket
+import tempfile
 import tomllib
 import uuid
 from dataclasses import dataclass, field, replace
@@ -45,15 +47,17 @@ def load_agent_config(path: str) -> AgentConfig:
 
 
 def ensure_identity(path: str, cfg: AgentConfig) -> AgentConfig:
-    """An agent.toml from before multi-agent has no identity: create it once and write it back."""
-    if cfg.agent_id:
+    """An agent.toml from before multi-agent has no identity (or blank fields): fill them once and write back."""
+    new = replace(cfg, agent_id=cfg.agent_id or str(uuid.uuid4()), agent_name=cfg.agent_name or socket.gethostname(),
+                  admin_password=cfg.admin_password or cfg.api_key)
+    if new == cfg:
         return cfg
     from availarr.setup import toml_dump
-    cfg = replace(cfg, agent_id=str(uuid.uuid4()), agent_name=cfg.agent_name or socket.gethostname(),
-                  admin_password=cfg.admin_password or cfg.api_key)
     with open(path, "rb") as fh:
         d = tomllib.load(fh)
-    d.update(agent_id=cfg.agent_id, agent_name=cfg.agent_name, admin_password=cfg.admin_password)
-    with open(path, "w", encoding="utf-8") as fh:
+    d.update(agent_id=new.agent_id, agent_name=new.agent_name, admin_password=new.admin_password)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".toml")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(toml_dump(d))
-    return cfg
+    os.replace(tmp, path)
+    return new

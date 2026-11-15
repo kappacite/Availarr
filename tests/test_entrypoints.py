@@ -51,3 +51,8 @@ def test_ensure_identity_writes_uuid(tmp_path):
     again = load_agent_config(str(p))
     assert again.agent_id == cfg.agent_id and again.admin_password == "k" and again.agent_name
     assert ensure_identity(str(p), again).agent_id == cfg.agent_id
+    assert (again.token, again.radarr_key, again.sonarr_url) == ("t", "1", "s")
+    p.write_text(p.read_text(encoding="utf-8").replace('agent_name = "' + again.agent_name + '"', 'agent_name = ""'),
+                 encoding="utf-8")
+    fixed = ensure_identity(str(p), load_agent_config(str(p)))
+    assert fixed.agent_name and fixed.agent_id == cfg.agent_id and load_agent_config(str(p)).agent_name

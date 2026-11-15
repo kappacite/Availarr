@@ -163,6 +163,13 @@ def test_agent_headers_register(env):
     assert jobs.store.agent("a1").name == "Lyon"
 
 
+def test_agent_name_is_percent_decoded(env):
+    from urllib.parse import quote
+    c, jobs = env
+    c.post("/v1/lookup", json=BODY, headers=A("a2", quote("Salon été")))
+    assert jobs.store.agent("a2").name == "Salon été"
+
+
 def test_no_header_is_legacy(env, jid):
     assert env[1].store.get(jid).agent == "legacy"
 

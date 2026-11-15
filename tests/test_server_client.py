@@ -30,3 +30,12 @@ def test_client_sends_identity():
                      agent_id="u1", agent_name="Lyon")
     c.ping()
     assert seen == [("u1", "Lyon")]
+
+
+def test_client_encodes_non_ascii_name():
+    seen = []
+    c = ServerClient("http://s", "t", httpx.Client(base_url="http://s", transport=httpx.MockTransport(
+        lambda r: seen.append(r.headers["X-Availarr-Agent-Name"]) or httpx.Response(200))),
+        agent_id="u1", agent_name="Salon été")
+    c.ping()
+    assert seen == ["Salon%20%C3%A9t%C3%A9"]
