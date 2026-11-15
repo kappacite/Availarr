@@ -3,14 +3,16 @@ import re
 import secrets
 import time
 from html import escape
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from availarr.server import stats
 from availarr.ui import CSS, LOGO
 from availarr.server.config import ServerConfig
+from availarr.server.db import Agent
 from availarr.server.jobs import Jobs
 from availarr.server.retention import fully_protected
 
@@ -20,6 +22,16 @@ REFUSED = "Refusée par l'envoyeur"
 POLL_MS = 4000  # ponytail: each poll asks A's Radarr/Sonarr queue per downloading job; fine for a handful
 STATS_POLL_MS = 15000
 AGENT_ONLINE_S = 120  # the agent pings every poll_seconds (30 s by default)
+BACK_OK = re.compile(r"/|/agents/[^/?#]+|/jobs/\d+")
+
+
+def fmt_date(ts: float) -> str:
+    return time.strftime("%d/%m %H:%M", time.localtime(ts))
+
+
+def fmt_dh(seconds: float) -> str:
+    d, h = divmod(int(seconds), 86400)
+    return f"{d} j {h // 3600:02d} h"
 
 
 def fmt_seed(seconds: int | None, seed_days: float) -> str:
@@ -231,10 +243,11 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         s = min(secs)
         return fmt_seed(s, cfg.seed_days), 100 * s / (cfg.seed_days * 86400), ok, line
 
-    def buttons(job, f: str) -> str:
+    def buttons(job, f: str, back: str = "/") -> str:
         def form(act, label, cls=""):
             c = f' class="{cls}"' if cls else ""
-            return f'<form method="post" action="/jobs/{job.id}/{act}?f={f}"><button{c}>{label}</button></form>'
+            return (f'<form method="post" action="/jobs/{job.id}/{act}?f={f}&amp;back={quote(back, safe="")}">'
+                    f"<button{c}>{label}</button></form>")
         hide = form("hide", "Retirer", "ghost")
         if job.state == "failed":
             return form("retry", "Réessayer") + hide
@@ -284,7 +297,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             return '<span class="pill p-lib">Dans ta bibliothèque</span>'
         return '<span class="pill p-tx">Prêt à envoyer</span>'
 
-    def row(job, now: float, f: str) -> str:
+    def row(job, now: float, f: str, back: str) -> str:
         if job.outcome == "cancelled":
             seed_txt, seed_pct, ok, line = "figé, demande annulée", None, True, ""
         else:
@@ -298,11 +311,12 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         dim = " dim" if job.deleted_at is not None or job.state == "failed" or job.outcome == "cancelled" else ""
         name, tags = split_title(job.release_title)
         chips = "".join(f'<span class="tag">{escape(t)}</span>' for t in tags)
-        return (f'<li class="job{dim}"><div><div class="t" title="{escape(job.release_title)}">{escape(name)}</div>'
+        return (f'<li class="job{dim}"><div><div class="t" title="{escape(job.release_title)}">'
+                f'<a href="/jobs/{job.id}">{escape(name)}</a></div>'
                 f'<div class="meta">{escape(meta)}</div>{err}<div class="line">{pill(job)}{chips}</div></div>'
                 f"<div>{download_bar(job)}{transfer_bar(job)}</div>"
                 f'<div>{seed_html}<div class="rm">Suppression : <b>{escape(fmt_removal(job, now, cfg, ok))}</b>'
-                f'</div></div><div class="acts">{buttons(job, f)}</div></li>')
+                f'</div></div><div class="acts">{buttons(job, f, back)}</div></li>')
 
     def summary(all_jobs) -> str:
         dl = sum(active(j) and j.state == "pending" for j in all_jobs)
@@ -318,29 +332,211 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             txt += f"{plural(todo, 'demande')} {'attendent' if todo > 1 else 'attend'} ta décision."
         return txt
 
-    def agent_status(now: float) -> str:
-        seen = max((a.last_seen for a in jobs.store.agents()), default=None)  # provisional, per-agent list later
-        if seen is not None and now - seen < AGENT_ONLINE_S:
-            return '<span class="pill p-ok">Agent en ligne</span>'
-        txt = "jamais vu depuis le démarrage" if seen is None else f"vu {fmt_ago(now - seen)}"
-        return f'<span class="pill p-bad">Agent hors ligne, {txt}</span>'
+    def agent_list() -> list[Agent]:
+        known = {a.id: a for a in jobs.store.agents()}
+        for j in jobs.store.all():  # an agent that never pinged (the pre-multi-agent "legacy") still has its jobs listed
+            known.setdefault(j.agent, Agent(j.agent, "Agent" if j.agent == "legacy" else j.agent, 0, None, False, False))
+        return list(known.values())
 
-    def requests_fragment(f: str) -> str:
+    def find_agent(id: str) -> Agent:
+        a = next((a for a in agent_list() if a.id == id), None)
+        if a is None:
+            raise HTTPException(404)
+        return a
+
+    def online(a: Agent, now: float) -> bool:
+        return a.last_seen is not None and now - a.last_seen < AGENT_ONLINE_S
+
+    def agent_pill(a: Agent, now: float) -> str:
+        if a.blocked:
+            return '<span class="pill">Bloqué</span>'
+        if online(a, now):
+            return '<span class="pill p-ok">En ligne</span>'
+        ago = f", vu {fmt_ago(now - a.last_seen)}" if a.last_seen is not None else ""
+        return f'<span class="pill p-bad">Hors ligne{ago}</span>'
+
+    def visible(agent: str | None = None) -> list:
+        return sorted((j for j in jobs.store.all() if j.hidden_at is None and agent in (None, j.agent)),
+                      key=lambda j: j.created_at, reverse=True)
+
+    def unmapped_banner() -> str:
+        return (f'<p class="warn">Profils du receveur sans correspondance dans [profiles] : '
+                f'{escape(", ".join(sorted(jobs.unmapped)))}</p>') if jobs.unmapped else ""
+
+    def agent_card(a: Agent, mine: list, now: float) -> str:
+        cls = " blocked" if a.blocked else "" if online(a, now) else " off"
+        nums = "".join(f"<div><b>{v}</b><span>{k}</span></div>" for k, v in (
+            ("En cours", sum(active(j) for j in mine)), ("À décider", sum(show(j, "pending") for j in mine)),
+            ("Livrés", sum(j.outcome == "delivered" for j in mine))))
+        if mine:
+            name = split_title(mine[0].release_title)[0]
+            last = f"Dernière demande : <b>{escape(name)}</b>, {fmt_ago(now - mine[0].created_at)}"
+        else:
+            last = "Aucune demande pour l'instant"
+        short = a.id if len(a.id) <= 13 else f"{a.id[:4]}…{a.id[-4:]}"
+        return (f'<a class="card agent{cls}" href="/agents/{quote(a.id, safe="")}">'
+                f'<div class="nm"><h3>{escape(a.name)}</h3>{agent_pill(a, now)}</div>'
+                f'<div class="id">agent {escape(short)}</div><div class="nums">{nums}</div>'
+                f'<div class="last">{last}</div></a>')
+
+    def agents_fragment() -> str:
+        now = clock()
+        all_jobs = visible()
+        order = sorted(agent_list(), key=lambda a: (not online(a, now), -(a.last_seen or 0)))
+        cards = "".join(agent_card(a, [j for j in all_jobs if j.agent == a.id], now) for a in order)
+        body = (f'<div class="agents">{cards}</div>' if cards else
+                '<p class="empty">Aucun agent pour l\'instant.</p>')
+        return (f'<div class="head"><div><h2>Agents</h2><p class="sub">{escape(summary(all_jobs))}</p></div></div>'
+                f'{unmapped_banner()}{body}'
+                '<p class="note">Un agent apparaît ici à sa première connexion avec le jeton partagé. '
+                "Son nom vient de sa configuration ; tu peux le renommer ou le bloquer depuis sa page.</p>")
+
+    def agent_fragment(id: str, f: str) -> str:
+        a = find_agent(id)
         f = f if f in FILTERS else "all"
         now = clock()
-        all_jobs = sorted((j for j in jobs.store.all() if j.hidden_at is None), key=lambda j: j.created_at, reverse=True)
-        banner = (f'<p class="warn">Profils du receveur sans correspondance dans [profiles] : '
-                  f'{escape(", ".join(sorted(jobs.unmapped)))}</p>') if jobs.unmapped else ""
-        seg = "".join(f'<a href="/?f={k}"{" class=on" if k == f else ""}>{v}'
-                      f"<b>{sum(show(j, k) for j in all_jobs)}</b></a>" for k, v in FILTERS.items())
-        rows = "".join(row(j, now, f) for j in all_jobs if show(j, f))
+        mine = visible(a.id)
+        back = f"/agents/{quote(a.id, safe='')}"
+        seg = "".join(f'<a href="{back}?f={k}"{" class=on" if k == f else ""}>{v}'
+                      f"<b>{sum(show(j, k) for j in mine)}</b></a>" for k, v in FILTERS.items())
+        rows = "".join(row(j, now, f, back) for j in mine if show(j, f))
         table = ('<div class="card"><div class="cols-h"><span>Titre</span><span>Progression</span>'
                  '<span>Seed et suppression</span><span></span></div>'
                  + (f'<ul class="jobs">{rows}</ul>' if rows else '<p class="empty">Aucune demande dans ce filtre.</p>')
                  + "</div>")
-        return (f'<div class="head"><div><h2>Demandes</h2><p class="sub">{escape(summary(all_jobs))}</p>'
-                f'<div class="line">{agent_status(now)}</div></div>'
-                f'<nav class="seg" aria-label="Filtres">{seg}</nav></div>{banner}{table}')
+        toggle = (f'<form method="post" action="{back}/unblock"><button>Débloquer</button></form>' if a.blocked else
+                  f'<form method="post" action="{back}/block"><button class="del">Bloquer</button></form>')
+        rename = (f'<form class="rename" method="post" action="{back}/rename"><input name="name" required '
+                  f'value="{escape(a.name)}" aria-label="Nom de l\'agent"><button>Renommer</button></form>')
+        return (f'<div class="crumb"><a href="/">Agents</a> › {escape(a.name)}</div>'
+                f'<div class="head"><div><h2>{escape(a.name)}</h2><p class="sub">{escape(summary(mine))}</p>'
+                f'<div class="line">{agent_pill(a, now)}<span class="tag mono">{escape(a.id)}</span>{rename}{toggle}</div></div>'
+                f'<nav class="seg" aria-label="Filtres">{seg}</nav></div>{unmapped_banner()}{table}'
+                '<p class="note">Clique sur un titre pour ouvrir le détail de la demande.</p>')
+
+    def steps(job, now: float) -> str:
+        live = job.deleted_at is None and job.outcome is None
+        items = [("ok", "Demandée par le receveur", f"profil {job.b_profile}", fmt_date(job.created_at))]
+        if job.state == "failed":
+            items.append(("", "Échec", job.error or "", "—"))
+        else:
+            dl_now = live and job.state == "pending"
+            items.append(("ok" if job.ready_at is not None else "now" if dl_now else "", "Téléchargée chez toi",
+                          "torrent terminé" if job.ready_at is not None else "",
+                          fmt_date(job.ready_at) if job.ready_at is not None else "en cours" if dl_now else "—"))
+            tx_now = live and job.state == "ready"
+            items.append(("ok" if job.outcome == "delivered" else "now" if tx_now else "", "Transfert vers le receveur",
+                          "", "en cours" if tx_now else "—"))
+            if job.outcome:
+                items.append(("ok", "Livrée" if job.outcome == "delivered" else "Annulée chez le receveur", "",
+                              fmt_date(job.closed_at) if job.closed_at else "—"))
+            else:
+                items.append(("", "Livrée", "le receveur confirme l'import", "—"))
+        if job.deleted_at is not None:
+            items.append(("ok", "Supprimée chez toi", "", fmt_date(job.deleted_at)))
+        else:
+            items.append(("", "Suppression chez toi", fmt_removal(job, now, cfg, True), "—"))
+        return "".join(f'<li class="{c}"><i></i><div>{escape(t)}<br><small>{escape(d)}</small></div>'
+                       f'<span class="when">{escape(w)}</span></li>' for c, t, d, w in items)
+
+    def torrents_card(job) -> str:
+        head = "<h3>Torrent chez toi</h3>"
+        if job.outcome == "cancelled":
+            return f'<div class="card">{head}<p class="note">Demande annulée : données figées, torrent non interrogé.</p></div>'
+        hashes = torrent_hashes(job)
+        if not hashes:
+            return f'<div class="card">{head}<p class="note">Aucun torrent pour cette demande.</p></div>'
+        try:
+            ts = qbit.info(hashes)
+        except Exception:
+            return f'<div class="card">{head}<p class="note">qBittorrent injoignable</p></div>'
+        rows = ""
+        for h in hashes:
+            t = ts.get(h)
+            short = f'<small style="color:var(--faint)">{escape(h[:4])}…{escape(h[-4:])}</small>'
+            if t is None:
+                rows += f'<tr><td class="mono">{short}</td><td>Absent</td>' + '<td class="r">—</td>' * 4 + "</tr>"
+                continue
+            done = t.progress >= 1 and t.seeding is not None
+            left = cfg.seed_days * 86400 - (t.seeding or 0)
+            rows += (f'<tr><td class="mono">{escape(t.name)} {short}</td>'
+                     f'<td>{"En seed" if t.progress >= 1 else "Téléchargement"}</td>'
+                     f'<td class="r">{fmt_dh(t.seeding) if done else "—"}</td>'
+                     f'<td class="r">{fmt_dh(left) if done and left > 0 else "—"}</td>'
+                     f'<td class="r">{fmt_mo(t.upspeed) if t.progress >= 1 else "↓ " + fmt_mo(t.dlspeed)}</td>'
+                     f'<td class="r">{f"{t.ratio:.2f}".replace(".", ",")}</td></tr>')
+        txt, pct, _, _ = seed(job)  # ponytail: asks qBittorrent a second time, fine for one detail page
+        return (f'<div class="card">{head}<table><tr><th>Torrent</th><th>État</th><th class="r">Seed</th>'
+                f'<th class="r">Reste</th><th class="r">Envoi</th><th class="r">Ratio</th></tr>{rows}</table>'
+                f'<div style="margin-top:14px">{bar("seed", "Seed réel", pct, txt, done=pct is not None and pct >= 100)}</div></div>')
+
+    def files_card(job) -> str:
+        files = []
+        if job.state == "ready" and job.deleted_at is None and job.outcome != "cancelled":
+            try:
+                files = jobs.status(job)["files"]
+            except Exception:  # A's Radarr/Sonarr down: the page must still render
+                files = []
+        rows = "".join(f'<tr><td class="mono">{escape(f["name"])}</td><td class="r">{fmt_bytes(f["size"])}</td></tr>'
+                       for f in files)
+        return ('<div class="card"><h3>Fichiers servis</h3>'
+                + (f'<table><tr><th>Fichier</th><th class="r">Taille</th></tr>{rows}</table>' if rows else
+                   '<p class="note">Aucun fichier à servir pour l\'instant.</p>') + "</div>")
+
+    def sends_card(job) -> str:
+        ts = [t for t in jobs.store.transfers() if t["job_id"] == job.id]
+        if not ts:
+            return '<div class="card"><h3>Envois</h3><p class="note">Aucun envoi pour l\'instant.</p></div>'
+        secs = sum(t["seconds"] for t in ts)
+        rate = sum(t["bytes"] for t in ts) / secs if secs >= 1 else None
+        rows = "".join(
+            f'<tr><td>{fmt_date(t["started_at"])}</td><td class="r">{fmt_bytes(t["bytes"])}</td>'
+            f'<td class="r">{fmt_dur(t["seconds"])}</td>'
+            f'<td class="r">{fmt_mo(t["bytes"] / t["seconds"] if t["seconds"] >= 1 else None)}</td>'
+            f'<td>{"Complet" if t["complete"] else "Interrompu"}</td></tr>' for t in ts)
+        return ('<div class="card"><h3>Envois</h3><dl>'
+                f'<div><dt>Tentatives</dt><dd>{len(ts)}</dd></div>'
+                f'<div><dt>Interrompus</dt><dd>{sum(not t["complete"] for t in ts)}</dd></div>'
+                f'<div><dt>Débit moyen</dt><dd>{fmt_mo(rate)}</dd></div></dl>'
+                '<table style="margin-top:12px"><tr><th>Début</th><th class="r">Taille</th><th class="r">Durée</th>'
+                f'<th class="r">Débit</th><th>État</th></tr>{rows}</table></div>')
+
+    def job_fragment(id: int) -> str:
+        job = jobs.store.get(id)
+        if job is None:
+            raise HTTPException(404)
+        a = find_agent(job.agent)
+        now = clock()
+        back = f"/agents/{quote(a.id, safe='')}"
+        name, tags = split_title(job.release_title)
+        chips = "".join(f'<span class="tag">{escape(t)}</span>' for t in tags)
+        acts = buttons(job, "all", f"/jobs/{job.id}")
+        note = "<p>Refuser : la demande échoue chez le receveur, qui cherche ailleurs.</p>" if "/refuse?" in acts else ""
+        req = jobs.cfg.profiles.get(job.b_profile) or jobs.cfg.profiles.get("default")
+        kind = what(job.item) + (f" ({plural(len(job.units), 'épisode')})" if job.item.kind == "season" else "")
+        facts = [("Agent", f'<a href="{back}">{escape(a.name)}</a>'), ("Type", escape(kind)),
+                 ("Profil du receveur", escape(job.b_profile)),
+                 ("Profil chez toi", escape(req.a_profiles[0]) if req else "non mappé"),
+                 ("Exigence", escape(f"{req.min_resolution}p minimum, {', '.join(req.languages) or 'toute langue'}")
+                  if req else "—"),
+                 ("Release annoncée", f'<span class="mono">{escape(job.release_title)}</span>'),
+                 ("Ajoutée par Availarr", "oui, l'entrée sera retirée à la suppression" if job.added_by_tool else "non"),
+                 ("Demande n°", str(job.id))]
+        dl = "".join(f"<div><dt>{k}</dt><dd>{v}</dd></div>" for k, v in facts)
+        eps = ""
+        if job.item.kind != "movie":
+            eps = ('<div class="card"><h3>Épisodes</h3><dl>'
+                   f'<div><dt>Demandés</dt><dd>{len(job.units)}</dd></div>'
+                   f'<div><dt>Déjà chez toi avant</dt><dd>{len(job.protected_units)}</dd></div>'
+                   f'<div><dt>Protégés 🔒</dt><dd>{len(job.protected_units) or "aucun"}</dd></div></dl></div>')
+        return (f'<div class="crumb"><a href="/">Agents</a> › <a href="{back}">{escape(a.name)}</a> › {escape(name)}</div>'
+                f'<div class="head"><div><h2>{escape(name)}</h2><div class="line">{pill(job)}{chips}</div></div>'
+                f'<div class="big-acts">{acts}{note}</div></div>'
+                '<div class="detail"><div>'
+                f'<div class="card"><h3>Progression</h3>{download_bar(job)}{transfer_bar(job)}'
+                f'<ul class="steps" style="margin-top:18px">{steps(job, now)}</ul></div>'
+                f"{torrents_card(job)}{files_card(job)}{sends_card(job)}</div>"
+                f'<div class="side"><div class="card"><h3>Demande</h3><dl>{dl}</dl></div>{eps}</div></div>')
 
     def stats_fragment() -> str:
         st = stats.compute(jobs.store.all(), jobs.store.transfers(), clock())
@@ -411,12 +607,12 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 "Le débit moyen des derniers envois sert aussi à estimer le temps restant affiché chez le receveur.</p>"
                 f'</div></div><div class="card figs">{figs}</div>{chart}{three}{table}')
 
-    def page(tab: str, inner: str, src: str, every: int) -> str:
+    def page(tab: str, inner: str, src: str, every: int, title: str | None = None) -> str:
         tabs = "".join(f'<a href="{href}"{" aria-current=page" if tab == name else ""}>{name}</a>'
-                       for name, href in (("Demandes", "/"), ("Statistiques", "/stats")))
+                       for name, href in (("Agents", "/"), ("Statistiques", "/stats")))
         return ('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
                 '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                f"<title>{tab}, Availarr</title><style>{CSS}</style></head><body>"
+                f"<title>{escape(title or tab)}, Availarr</title><style>{CSS}</style></head><body>"
                 f'<header class="top"><div class="in"><a class="brand" href="/">{LOGO}Availarr</a>'
                 f'<nav class="tabs" aria-label="Sections">{tabs}</nav>'
                 f'<div class="live"><i></i><span>À jour toutes les {every // 1000} s</span></div></div></header>'
@@ -424,12 +620,42 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
                 f"<script>{JS}</script></body></html>")
 
     @app.get("/", response_class=HTMLResponse)
-    def index(f: str = "all"):
-        return page("Demandes", requests_fragment(f), "/fragment", POLL_MS)
+    def index():
+        return page("Agents", agents_fragment(), "/fragment", POLL_MS)
 
     @app.get("/fragment", response_class=HTMLResponse)
-    def frag(f: str = "all"):
-        return requests_fragment(f)
+    def frag():
+        return agents_fragment()
+
+    @app.get("/agents/{id}", response_class=HTMLResponse)
+    def agent_page(id: str, f: str = "all"):
+        return page("Agents", agent_fragment(id, f), f"/agents/{quote(id, safe='')}/fragment", POLL_MS,
+                    find_agent(id).name)
+
+    @app.get("/agents/{id}/fragment", response_class=HTMLResponse)
+    def agent_frag(id: str, f: str = "all"):
+        return agent_fragment(id, f)
+
+    @app.post("/agents/{id}/{action}")
+    def agent_act(id: str, action: str, name: str = Form("")):
+        find_agent(id)
+        if action == "rename":
+            if name.strip():
+                jobs.store.set_agent(id, name=name.strip(), renamed=1)
+        elif action in ("block", "unblock"):
+            jobs.store.set_agent(id, blocked=int(action == "block"))
+        else:
+            raise HTTPException(404)
+        return RedirectResponse(f"/agents/{quote(id, safe='')}", 303)
+
+    @app.get("/jobs/{id}", response_class=HTMLResponse)
+    def job_page(id: int):
+        inner = job_fragment(id)  # 404s on an unknown job
+        return page("Agents", inner, f"/jobs/{id}/fragment", POLL_MS, split_title(jobs.store.get(id).release_title)[0])
+
+    @app.get("/jobs/{id}/fragment", response_class=HTMLResponse)
+    def job_frag(id: int):
+        return job_fragment(id)
 
     @app.get("/stats", response_class=HTMLResponse)
     def stats_page():
@@ -440,7 +666,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
         return stats_fragment()
 
     @app.post("/jobs/{id}/{action}")
-    def act(id: int, action: str, f: str = "all"):
+    def act(id: int, action: str, f: str = "all", back: str = "/"):
         job = jobs.store.get(id)
         if job is None or action not in (*ACTIONS, "retry", "refuse", "hide"):
             raise HTTPException(404)
@@ -455,6 +681,6 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time) -> FastAP
             jobs.store.set(id, state="retried")
         else:
             jobs.store.set(id, decision=ACTIONS[action])
-        return RedirectResponse(f"/?f={f if f in FILTERS else 'all'}", 303)
+        return RedirectResponse(f"{back if BACK_OK.fullmatch(back) else '/'}?f={f if f in FILTERS else 'all'}", 303)
 
     return app
