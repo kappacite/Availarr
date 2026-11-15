@@ -106,3 +106,17 @@ def test_info_tolerates_nulls():
 def test_info_null_name_and_state():
     t = make([{"hash": H, "name": None, "state": None, "progress": 1}])[0].info([H])[H]
     assert (t.name, t.state) == ("", "")
+
+
+def test_all_lists_every_torrent():
+    seen = []
+
+    def h(req):
+        if req.url.path.endswith("/auth/login"):
+            return httpx.Response(200, text="Ok.")
+        seen.append(dict(req.url.params))
+        return httpx.Response(200, json=[{"hash": "A" * 40, "name": "X", "progress": 1, "ratio": 1}, {"name": "nohash"}])
+    from availarr.server.qbit import QBit
+    q = QBit("http://q", "u", "p", httpx.Client(transport=httpx.MockTransport(h), base_url="http://q"))
+    ts = q.all()
+    assert [t.hash for t in ts] == ["a" * 40] and ts[0].name == "X" and seen == [{}]

@@ -1,3 +1,4 @@
+import difflib
 import math
 import re
 import secrets
@@ -5,7 +6,7 @@ import time
 from html import escape
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Form, HTTPException
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -128,7 +129,7 @@ async function tick(){
     main.innerHTML=await r.text();document.body.classList.remove('stale');
   }catch(e){document.body.classList.add('stale')}
 }
-setInterval(tick,+main.dataset.every);
+if(+main.dataset.every)setInterval(tick,+main.dataset.every);
 """
 
 
@@ -427,8 +428,10 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
         if job.outcome == "cancelled":
             return f'<div class="card">{head}<p class="note">Demande annulée : données figées, torrent non interrogé.</p></div>', True
         hashes = torrent_hashes(job)
+        link = (f'<p class="note"><a href="/jobs/{job.id}/link">Lier un torrent</a> si le bon n’est pas trouvé '
+                f"(seed affiché ; supprimé avec la demande si elle l'est un jour).</p>" if job.deleted_at is None else "")
         if not hashes:
-            return f'<div class="card">{head}<p class="note">Aucun torrent pour cette demande.</p></div>', True
+            return f'<div class="card">{head}<p class="note">Aucun torrent pour cette demande.</p>{link}</div>', True
         try:
             ts = qbit.info(hashes)
         except Exception:
@@ -449,9 +452,14 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
                      f'<td class="r">{fmt_mo(t.upspeed) if t.progress >= 1 else "↓ " + fmt_mo(t.dlspeed)}</td>'
                      f'<td class="r">{f"{t.ratio:.2f}".replace(".", ",")}</td></tr>')
         txt, pct, ok, _ = seed(job, ts)
+        linked = "".join(
+            f'<form method="post" action="/jobs/{job.id}/torrent"><input type="hidden" name="action" value="unlink">'
+            f'<input type="hidden" name="hash" value="{escape(h)}"><button class="ghost">Délier {escape(h[:4])}…</button></form>'
+            for h in job.hashes) if job.deleted_at is None else ""
         return (f'<div class="card">{head}<table><tr><th>Torrent</th><th>État</th><th class="r">Seed</th>'
                 f'<th class="r">Reste</th><th class="r">Envoi</th><th class="r">Ratio</th></tr>{rows}</table>'
-                f'<div style="margin-top:14px">{bar("seed", "Seed réel", pct, txt, done=pct is not None and pct >= 100)}</div></div>', ok)
+                f'<div style="margin-top:14px">{bar("seed", "Seed réel", pct, txt, done=pct is not None and pct >= 100)}</div>'
+                f'<div class="acts" style="justify-content:flex-start;margin-top:12px">{linked}</div>{link}</div>', ok)
 
     def files_card(job) -> str:
         files = []
@@ -654,6 +662,58 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
     @app.get("/stats/fragment", response_class=HTMLResponse)
     def stats_frag():
         return stats_fragment()
+
+    def norm(t: str) -> str:
+        return re.sub(r"[._\-\[\]()]+", " ", t).lower().strip()
+
+    @app.get("/jobs/{id}/link", response_class=HTMLResponse)
+    def link_page(id: int):
+        job = jobs.store.get(id)
+        if job is None:
+            raise HTTPException(404)
+        name = split_title(job.release_title)[0]
+        try:
+            ts = [t for t in qbit.all() if t.hash not in job.hashes]
+        except Exception:
+            ts = None
+        if ts is None:
+            body = '<p class="warn">qBittorrent injoignable.</p>'
+        else:
+            # ponytail: plain similarity on names, top 30; a search box if lists get long
+            want = norm(name)
+            ts.sort(key=lambda t: difflib.SequenceMatcher(None, want, norm(t.name)).ratio(), reverse=True)
+            rows = "".join(
+                f'<tr><td class="mono">{escape(t.name)}</td><td>{"En seed" if t.progress >= 1 else f"{t.progress:.0%}"}</td>'
+                f'<td class="r"><form method="post" action="/jobs/{id}/torrent"><input type="hidden" name="action" value="link">'
+                f'<input type="hidden" name="hash" value="{escape(t.hash)}"><button>Lier</button></form></td></tr>'
+                for t in ts[:30])
+            body = (f"<div class=\"card block\"><table><tr><th>Torrent</th><th>État</th><th></th></tr>{rows}</table></div>"
+                    if rows else '<p class="empty">Aucun torrent dans qBittorrent.</p>')
+        inner = (f'<div class="crumb"><a href="/jobs/{id}">{escape(name)}</a> › Lier un torrent</div>'
+                 f'<div class="head"><div><h2>Lier un torrent</h2><p class="sub">Choisis le torrent de qBittorrent qui '
+                 f"correspond à cette demande. Son seed s'affiche sur la demande ; si la demande est supprimée un jour, "
+                 f"ce torrent l'est aussi. Les plus ressemblants au titre sont en haut.</p></div></div>{body}")
+        return page("Agents", inner, f"/jobs/{id}/link", 0, "Lier un torrent")
+
+    @app.post("/jobs/{id}/torrent")
+    async def torrent(id: int, request: Request):
+        job = jobs.store.get(id)
+        if job is None:
+            raise HTTPException(404)
+        form = await request.form()
+        action, h = form.get("action"), str(form.get("hash", "")).strip().lower()
+        if action not in ("link", "unlink") or not re.fullmatch(r"[0-9a-f]{40}", h):
+            raise HTTPException(400)
+        if job.deleted_at is not None:
+            raise HTTPException(409)
+        if action == "link":
+            if h not in {t.hash for t in qbit.all()}:
+                raise HTTPException(400, "torrent inconnu de qBittorrent")
+            hashes = list(dict.fromkeys(job.hashes + [h]))
+        else:
+            hashes = [x for x in job.hashes if x != h]
+        jobs.store.set(id, hashes=hashes)
+        return RedirectResponse(f"/jobs/{id}", 303)
 
     @app.post("/jobs/{id}/{action}")
     def act(id: int, action: str, f: str = "all", back: str = "/"):

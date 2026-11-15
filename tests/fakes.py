@@ -68,6 +68,9 @@ class FakeQbit:
                 out[h] = Torrent(h, "", "stalledUP", 1.0, s, 0, 0, 0.0, 0)
         return out
 
+    def all(self):
+        return list(self.torrents.values())
+
     def seeding_seconds(self, h):
         return self.seed.get(h)
 

@@ -435,3 +435,56 @@ def test_panel_action_cross_site_403(env):
     j = mk()
     assert c.post(f"/jobs/{j.id}/keep", headers={"Origin": "http://evil"}, auth=("u", jobs.cfg.admin_password)).status_code == 403
     assert jobs.store.get(j.id).decision == "none"
+
+
+A1, A2, A3 = "a" * 40, "b" * 40, "c" * 40
+
+
+def _torrents(qbit):
+    from availarr.server.qbit import Torrent
+    for h, name in ((A1, "Some.Other.Movie.2019.1080p"), (A2, "Star.Trek.Strange.New.Worlds.S04.1080p.WEB-DL"),
+                    (A3, "Dune.2021.MULTi.1080p")):
+        qbit.torrents[h] = Torrent(h, name, "stalledUP", 1.0, 3600, 0, 0, 0.5, 0)
+
+
+def test_link_page_lists_best_match_first(env):
+    jobs, qbit, mk, c = env
+    _torrents(qbit)
+    j = mk(title="Star.Trek.Strange.New.Worlds.S04.1080p.WEB-DL-Availarr", hashes=[])
+    r = c.get(f"/jobs/{j.id}/link", auth=AUTH)
+    assert r.status_code == 200 and "data-every=\"0\"" in r.text  # no live refresh while choosing
+    assert r.text.index("Strange.New.Worlds") < r.text.index("Some.Other.Movie")
+    assert f'<a href="/jobs/{j.id}/link">Lier un torrent</a>' in c.get(f"/jobs/{j.id}", auth=AUTH).text
+
+
+def test_link_and_unlink_torrent(env):
+    jobs, qbit, mk, c = env
+    _torrents(qbit)
+    j = mk(hashes=[])
+    r = c.post(f"/jobs/{j.id}/torrent", data={"action": "link", "hash": A2.upper()}, auth=AUTH)
+    assert r.status_code == 303 and r.headers["location"] == f"/jobs/{j.id}"
+    assert jobs.store.get(j.id).hashes == [A2]
+    c.post(f"/jobs/{j.id}/torrent", data={"action": "link", "hash": A2}, auth=AUTH)
+    assert jobs.store.get(j.id).hashes == [A2]  # no duplicate
+    assert "Strange.New.Worlds" in c.get(f"/jobs/{j.id}", auth=AUTH).text  # seed now read from it
+    c.post(f"/jobs/{j.id}/torrent", data={"action": "unlink", "hash": A2}, auth=AUTH)
+    assert jobs.store.get(j.id).hashes == []
+
+
+def test_link_rejects_unknown_or_bad_hash(env):
+    jobs, qbit, mk, c = env
+    _torrents(qbit)
+    j = mk(hashes=[])
+    assert c.post(f"/jobs/{j.id}/torrent", data={"action": "link", "hash": "d" * 40}, auth=AUTH).status_code == 400
+    assert c.post(f"/jobs/{j.id}/torrent", data={"action": "link", "hash": "all"}, auth=AUTH).status_code == 400
+    assert c.post(f"/jobs/{j.id}/torrent", data={"action": "nope", "hash": A1}, auth=AUTH).status_code == 400
+    assert c.post("/jobs/999/torrent", data={"action": "link", "hash": A1}, auth=AUTH).status_code == 404
+    assert jobs.store.get(j.id).hashes == []
+
+
+def test_no_link_on_deleted_or_cancelled(env):
+    jobs, qbit, mk, c = env
+    _torrents(qbit)
+    j = mk(hashes=[], deleted_at=5.0)
+    assert c.post(f"/jobs/{j.id}/torrent", data={"action": "link", "hash": A1}, auth=AUTH).status_code == 409
+    assert "Lier un torrent" not in c.get(f"/jobs/{j.id}", auth=AUTH).text

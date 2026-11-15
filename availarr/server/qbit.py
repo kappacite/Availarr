@@ -82,6 +82,10 @@ class QBit:
         t = self._req("GET", "/torrents/info", params={"hashes": "|".join(dict.fromkeys(ok))}).json()
         return {x["hash"].lower(): (float(x["progress"]), _eta(x)) for x in t if x.get("hash")}
 
+    def all(self) -> list[Torrent]:
+        """Every torrent, for linking one to a request by hand."""
+        return [_torrent(x) for x in self._req("GET", "/torrents/info").json() if x.get("hash")]
+
     def info(self, hashes: list[str]) -> dict[str, Torrent]:
         """hash -> live Torrent, one /torrents/info call; invalid hashes are ignored."""
         ok = []

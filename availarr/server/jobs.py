@@ -125,8 +125,8 @@ class Jobs:
             if keep == job.protected_units:
                 continue
             try:
-                hashes = (self.lib(job.item).hashes(job.item, self._since(job, all_jobs), keep) if job.state == "ready"
-                          else job.hashes)
+                hashes = (list(dict.fromkeys(job.hashes + self.lib(job.item).hashes(job.item, self._since(job, all_jobs), keep)))
+                          if job.state == "ready" else job.hashes)
             except Exception as e:  # noqa: BLE001 - arr down: try again next tick
                 log.warning("job %s: protection not repaired yet: %s", job.id, e)
                 continue
@@ -148,7 +148,7 @@ class Jobs:
         if units and all(satisfies(u.file, req) for u in units):
             job.state, job.ready_at = "ready", now
             job.units = [u.key for u in units]
-            job.hashes = lib.hashes(job.item, self._since(job), job.protected_units)
+            job.hashes = list(dict.fromkeys(job.hashes + lib.hashes(job.item, self._since(job), job.protected_units)))  # keep linked ones
         elif now - job.created_at >= self.cfg.fail_days * 86400:
             job.state, job.error = "failed", f"Introuvable chez l'envoyeur après {self.cfg.fail_days:g} j"
         else:

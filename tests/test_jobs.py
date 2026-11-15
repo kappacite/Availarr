@@ -327,3 +327,12 @@ def test_repair_keeps_protection_that_was_already_there(mk):
     j.store.set(later.id, state="ready", ready_at=2.0)
     j.repair_protection()
     assert j.store.get(later.id).protected_units == [EPS[0]]
+
+
+def test_refresh_keeps_a_manually_linked_torrent(mk):
+    lib = FakeLibrary([NONE], hashes=["found"])
+    j = mk(lib)
+    job = j.request(M, P, "T")
+    j.store.set(job.id, hashes=["linked"])
+    lib.units = [Unit("movie:603", True, True, GOOD)]
+    assert j.refresh(j.store.get(job.id)).hashes == ["linked", "found"]
