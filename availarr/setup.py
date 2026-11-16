@@ -247,14 +247,16 @@ def _section(title, hint, body, test=None):
 
 def server_form(v: dict) -> str:
     g = v.get
-    rows = v.get("profiles") or [{"name": "default", "a": "", "res": "1080", "lang": "", "announce": "1080p.WEB-DL"}]
+    rows = v.get("profiles") or [{"name": "default", "a": "", "res": "1080", "lang": "", "subs": "", "announce": "1080p.WEB-DL"}]
     prow = ('<div class="prow">' + _field("Profil du receveur", "p_name", "{name}") + _field("Profil chez toi", "p_a", "{a}",
             listid="profiles-radarr") + _field("Résolution min.", "p_res", "{res}", "number")
             + _field("Langues", "p_lang", "{lang}", required=False, hint="ex. French")
+            + _field("Sous-titres", "p_subs", "{subs}", required=False,
+                     hint="si la langue manque, envoyé quand même avec ces sous-titres (ex. French)")
             + _field("Qualité annoncée", "p_announce", "{announce}")
             + '<button type="button" onclick="this.parentNode.remove()">Retirer</button></div>')
     rows_html = "".join(prow.format(**{k: escape(str(x)) for k, x in r.items()}) for r in rows)
-    template = prow.format(name="", a="", res="1080", lang="", announce="1080p.WEB-DL")
+    template = prow.format(name="", a="", res="1080", lang="", subs="", announce="1080p.WEB-DL")
     ts = tailscale_ip()
     where = (f"Adresse de ce server à donner à l'agent : <b>http://{ts}:8787</b> (Tailscale)." if ts else
              "Tailscale n'est pas détecté ici : l'agent devra joindre ce server autrement (voir le README).")
@@ -336,13 +338,15 @@ def _num(v, default):
 
 def server_config(form) -> dict:
     profiles = {}
-    for name, a, res, lang, ann in zip(form.getlist("p_name"), form.getlist("p_a"), form.getlist("p_res"),
-                                       form.getlist("p_lang"), form.getlist("p_announce")):
+    for name, a, res, lang, subs, ann in zip(form.getlist("p_name"), form.getlist("p_a"), form.getlist("p_res"),
+                                             form.getlist("p_lang"), (form.getlist("p_subs") + [""] * len(form.getlist("p_name"))), form.getlist("p_announce")):
         if name.strip():
             profiles[name.strip()] = {"a_profiles": [x.strip() for x in a.split(",") if x.strip()],
                                       "min_resolution": _num(res, 1080),
                                       "languages": [x.strip() for x in lang.split(",") if x.strip()],
                                       "announce": ann.strip()}
+            if sub := [x.strip() for x in subs.split(",") if x.strip()]:
+                profiles[name.strip()]["subtitles"] = sub
     f = form.get
     return {"token": f("token", ""), "admin_password": f("admin_password", ""),
             "bandwidth_mbps": _num(f("bandwidth_mbps"), 0),
@@ -371,9 +375,10 @@ def _values(kind: str, form) -> dict:
     """Form back into the page's field values, so an error never loses what was typed."""
     v = {k: form.get(k) for k in form.keys() if not k.startswith("p_")}
     if kind == "server":
-        v["profiles"] = [{"name": n, "a": a, "res": r, "lang": l, "announce": an} for n, a, r, l, an in zip(
+        v["profiles"] = [{"name": n, "a": a, "res": r, "lang": l, "subs": s, "announce": an}
+                         for n, a, r, l, s, an in zip(
             form.getlist("p_name"), form.getlist("p_a"), form.getlist("p_res"), form.getlist("p_lang"),
-            form.getlist("p_announce"))]
+            (form.getlist("p_subs") + [""] * len(form.getlist("p_name"))), form.getlist("p_announce"))]
     return v
 
 
@@ -471,7 +476,8 @@ def form_values(kind: str, d: dict) -> dict:
             "keep_days": ret.get("keep_days", 7), "seed_days": ret.get("seed_days", 3),
             "fail_days": ret.get("fail_days", 7),
             "profiles": [{"name": n, "a": ", ".join(p.get("a_profiles", [])), "res": p.get("min_resolution", 1080),
-                          "lang": ", ".join(p.get("languages", [])), "announce": p.get("announce", "")}
+                          "lang": ", ".join(p.get("languages", [])),
+                          "subs": ", ".join(p.get("subtitles", [])), "announce": p.get("announce", "")}
                          for n, p in d.get("profiles", {}).items()]}
 
 

@@ -24,4 +24,5 @@ episode_gb = 2
 a_profiles = ["1080p MULTi"]
 min_resolution = 1080
 languages = ["French"]
+subtitles = ["French"]        # optionnel : VO acceptée si ces sous-titres sont là
 announce = "MULTi.1080p.WEB-DL"

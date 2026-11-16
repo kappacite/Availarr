@@ -270,3 +270,9 @@ def test_step_blocked_keeps_retrying(env):
     env.server.status = _status_error(403)  # blocking is reversible
     step(env.store, env.server)
     assert env.job().state == "queued"
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX modes")
+def test_downloaded_file_is_777(env):
+    env.server.download(env.jid, 0, env.dir / "Dune.mkv", 1000, lambda n: None)
+    assert (env.dir / "Dune.mkv").stat().st_mode & 0o777 == 0o777

@@ -4,7 +4,7 @@ import httpx
 
 from availarr.common import Item
 from availarr.server.library import Live, Unit, queue_progress
-from availarr.server.quality import FileInfo
+from availarr.server.quality import FileInfo, subs_of
 
 
 def _epoch(iso: str) -> float:
@@ -44,7 +44,8 @@ class Radarr:
         info = None
         if f:
             q = f["quality"]["quality"]
-            info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"], f.get("sceneName"))
+            info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"], f.get("sceneName"),
+                            subs_of(f))
         return [Unit(key, True, m["monitored"], info)]
 
     def title(self, item: Item) -> tuple[str, int | None]:

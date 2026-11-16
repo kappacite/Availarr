@@ -69,6 +69,7 @@ class ServerClient:
                 total = int(r.headers["Content-Range"].rpartition("/")[2])
                 if have == total:
                     part.replace(dest)  # .part already holds the whole file
+                    dest.chmod(0o777)
                     return
                 if have < total or not _retry:
                     raise OSError(f"reprise impossible: {have}/{total}")
@@ -91,6 +92,7 @@ class ServerClient:
         if have != total:
             raise OSError(f"flux incomplet: {have}/{total}")
         part.replace(dest)
+        dest.chmod(0o777)
 
 
 class Cancelled(Exception):

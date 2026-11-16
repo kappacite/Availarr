@@ -5,7 +5,7 @@ import httpx
 
 from availarr.common import Item
 from availarr.server.library import Live, Unit, queue_progress
-from availarr.server.quality import FileInfo
+from availarr.server.quality import FileInfo, subs_of
 from availarr.server.radarr import _epoch
 
 
@@ -58,7 +58,8 @@ class Sonarr:
             info = None
             if f:
                 q = f["quality"]["quality"]
-                info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"], f.get("sceneName"))
+                info = FileInfo(q["resolution"], q["name"], [l["name"] for l in f.get("languages", [])], f["path"], f["size"], f.get("sceneName"),
+                            subs_of(f))
             out.append(Unit(self._key(item, e), True, e["monitored"], info))
         return out
 

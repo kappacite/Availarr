@@ -30,3 +30,13 @@ def test_original_title():
     assert original_title(f("/m/Thor.2013.MULTi.BluRay.mkv"), anyl) is None      # no resolution tag
     assert original_title(f("/m/Thor.2013.MULTi.4K.mkv", res=2160), fr) == "Thor.2013.MULTi.4K"
     assert original_title(f("/m/x.mkv", 'bad"name.1080p'), anyl) is None
+
+
+def test_subtitles_stand_in_for_missing_audio():
+    from availarr.server.quality import subs_of
+    req = Requirement(["x"], 1080, ["French"], "MULTi.1080p", subtitles=["French"])
+    vo = FileInfo(1080, "Bluray-1080p", ["English"], "/m/a.mkv", 1, subtitles=subs_of({"mediaInfo": {"subtitles": "eng/fre"}}))
+    assert satisfies(vo, req) and file_tags(vo, req) == "VOSTFR.1080p.BluRay"
+    assert not satisfies(FileInfo(1080, "Bluray-1080p", ["English"], "/m/a.mkv", 1, subtitles=["English"]), req)
+    assert not satisfies(vo, Requirement(["x"], 1080, ["French"], "MULTi.1080p"))  # no subtitles key: audio only
+    assert subs_of({"mediaInfo": {"subtitles": "French / English"}}) == ["French", "English"] and subs_of({}) == []

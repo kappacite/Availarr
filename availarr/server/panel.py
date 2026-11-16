@@ -509,7 +509,8 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
         facts = [("Agent", f'<a href="{back}">{escape(a.name)}</a>'), ("Type", escape(kind)),
                  ("Profil du receveur", escape(job.b_profile)),
                  ("Profil chez toi", escape(req.a_profiles[0]) if req else "non mappé"),
-                 ("Exigence", escape(f"{req.min_resolution}p minimum, {', '.join(req.languages) or 'toute langue'}")
+                 ("Exigence", escape(f"{req.min_resolution}p minimum, {', '.join(req.languages) or 'toute langue'}"
+                         + (f" (ou sous-titres {', '.join(req.subtitles)})" if req.subtitles else ""))
                   if req else "—"),
                  ("Release annoncée", f'<span class="mono">{escape(job.release_title)}</span>'),
                  ("Ajoutée par Availarr", "oui, l'entrée sera retirée à la suppression" if job.added_by_tool else "non"),
@@ -691,7 +692,8 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
                     if rows else '<p class="empty">Aucun torrent dans qBittorrent.</p>')
         inner = (f'<div class="crumb"><a href="/jobs/{id}">{escape(name)}</a> › Lier un torrent</div>'
                  f'<div class="head"><div><h2>Lier un torrent</h2><p class="sub">Choisis le torrent de qBittorrent qui '
-                 f"correspond à cette demande. Son seed s'affiche sur la demande ; si la demande est supprimée un jour, "
+                 f"correspond à cette demande. Si elle attend encore, ses fichiers sont envoyés au receveur. Son seed "
+                 f"s'affiche sur la demande ; si la demande est supprimée un jour, "
                  f"ce torrent l'est aussi. Les plus ressemblants au titre sont en haut.</p></div></div>{body}")
         return page("Agents", inner, f"/jobs/{id}/link", 0, "Lier un torrent")
 
@@ -712,7 +714,7 @@ def create_panel(jobs: Jobs, qbit, cfg: ServerConfig, clock=time.time, config_pa
             hashes = list(dict.fromkeys(job.hashes + [h]))
         else:
             hashes = [x for x in job.hashes if x != h]
-        jobs.store.set(id, hashes=hashes)
+        jobs.link(job, hashes)
         return RedirectResponse(f"/jobs/{id}", 303)
 
     @app.post("/jobs/{id}/{action}")

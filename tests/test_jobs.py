@@ -336,3 +336,23 @@ def test_refresh_keeps_a_manually_linked_torrent(mk):
     j.store.set(job.id, hashes=["linked"])
     lib.units = [Unit("movie:603", True, True, GOOD)]
     assert j.refresh(j.store.get(job.id)).hashes == ["linked", "found"]
+
+
+def test_linking_a_torrent_to_a_waiting_request_serves_its_files(mk, tmp_path):
+    from availarr.server.qbit import Torrent
+    from tests.fakes import FakeQbit
+    j = mk(FakeLibrary([NONE]))
+    j.qbit = q = FakeQbit({})
+    f = tmp_path / "Dune.mkv"
+    f.write_bytes(b"x" * 5)
+    h = "a" * 40
+    q.torrents[h] = Torrent(h, "Dune", "downloading", 0.5, None, 0, 0, 0.0, 0)
+    q.content = {h: [(str(f), 5)]}
+    job = j.request(M, P, "T")
+    j.link(job, [h])
+    assert j.store.get(job.id).state == "pending"  # not sent half downloaded
+    q.torrents[h].progress = 1.0
+    job = j.refresh(j.store.get(job.id))
+    assert job.state == "ready" and job.ready_at is not None
+    assert j.status(job)["files"] == [{"index": 0, "name": "Dune.mkv", "size": 5}]
+    assert j.file_path(job, 0) == (str(f), 5)

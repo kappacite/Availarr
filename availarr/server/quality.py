@@ -1,6 +1,6 @@
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 SOURCES = {"Bluray": "BluRay", "WEBDL": "WEB-DL", "WEBRip": "WEBRip", "HDTV": "HDTV", "Remux": "REMUX"}
 
@@ -13,6 +13,7 @@ class FileInfo:
     path: str
     size: int
     scene_name: str | None = None  # original release name recorded by the arr, if any
+    subtitles: list[str] = field(default_factory=list)  # as the arr's mediaInfo reads them (names or ISO codes)
 
 
 @dataclass
@@ -21,10 +22,32 @@ class Requirement:
     min_resolution: int
     languages: list[str]
     announce: str
+    subtitles: list[str] = field(default_factory=list)  # wrong audio is fine if these subtitles are there
+
+
+# ponytail: common ISO 639 codes only; add a language here if its arr reports codes for it
+_CODES = {"french": {"fr", "fre", "fra"}, "english": {"en", "eng"}, "german": {"de", "ger", "deu"},
+          "spanish": {"es", "spa"}, "italian": {"it", "ita"}, "portuguese": {"pt", "por"}, "dutch": {"nl", "dut", "nld"}}
+
+
+def has_subs(f: FileInfo, langs: list[str]) -> bool:
+    have = {s.strip().lower() for s in f.subtitles}
+    return all(have & ({l.lower()} | _CODES.get(l.lower(), set())) for l in langs)
+
+
+def subs_of(arr_file: dict) -> list[str]:
+    """Subtitle languages from a Radarr/Sonarr file's mediaInfo ("French/English", or a list)."""
+    s = (arr_file.get("mediaInfo") or {}).get("subtitles") or []
+    return [x.strip() for x in (s.split("/") if isinstance(s, str) else s) if isinstance(x, str) and x.strip()]
+
+
+def audio_ok(f: FileInfo, req: Requirement) -> bool:
+    return all(l in f.languages for l in req.languages)
 
 
 def satisfies(f: FileInfo | None, req: Requirement) -> bool:
-    return f is not None and f.resolution >= req.min_resolution and all(l in f.languages for l in req.languages)
+    return (f is not None and f.resolution >= req.min_resolution
+            and (audio_ok(f, req) or bool(req.subtitles) and has_subs(f, req.subtitles)))
 
 
 _FRENCH = {"FRENCH", "TRUEFRENCH", "VFF", "VFQ", "VFI", "VF", "VF2"}
@@ -47,8 +70,10 @@ def original_title(f: FileInfo, req: Requirement) -> str | None:
     return name
 
 
-def file_tags(f: FileInfo) -> str:
-    if len(f.languages) > 1:
+def file_tags(f: FileInfo, req: Requirement | None = None) -> str:
+    if req and not audio_ok(f, req):  # sent for its subtitles: say so, B's arr reads VOSTFR as French
+        lang = "VOSTFR" if "French" in req.subtitles else "SUBBED"
+    elif len(f.languages) > 1:
         lang = "MULTi"
     else:
         lang = f.languages[0].upper() if f.languages and f.languages[0] != "English" else ""

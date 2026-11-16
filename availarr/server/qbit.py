@@ -1,3 +1,4 @@
+import posixpath
 import re
 import time
 from dataclasses import dataclass
@@ -85,6 +86,16 @@ class QBit:
     def all(self) -> list[Torrent]:
         """Every torrent, for linking one to a request by hand."""
         return [_torrent(x) for x in self._req("GET", "/torrents/info").json() if x.get("hash")]
+
+    def files(self, h: str) -> list[tuple[str, int]]:
+        """(path, size) of a torrent's files, as qBittorrent sees them: mount them at the same path."""
+        h = _norm(h)
+        t = self._req("GET", "/torrents/info", params={"hashes": h}).json()
+        if not t:
+            return []
+        save = t[0].get("save_path") or ""
+        return [(posixpath.join(save, f["name"]), int(f["size"]))
+                for f in self._req("GET", "/torrents/files", params={"hash": h}).json()]
 
     def info(self, hashes: list[str]) -> dict[str, Torrent]:
         """hash -> live Torrent, one /torrents/info call; invalid hashes are ignored."""

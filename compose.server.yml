@@ -44,6 +44,8 @@ services:
       - ./data:/data   # préparer : mkdir -p config data && sudo chown 1000:1000 config data
       # Médias de l'envoyeur, au MÊME chemin que dans son Radarr/Sonarr
       - /media:/media:ro
+      # Torrents liés à la main dans le panel : leurs fichiers sont lus au chemin vu par qBittorrent
+      # (save_path). Monter ce dossier au même chemin si les médias ne le contiennent pas déjà.
 
 volumes:
   tailscale-run:

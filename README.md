@@ -216,6 +216,7 @@ Rien n'est deviné : chaque entrée associe un **profil qualité du receveur** (
 | `a_profiles` | profil(s) de l'envoyeur. Le premier sert pour un ajout ou une mise à niveau ; un fichier dans n'importe lequel compte comme suffisant. |
 | `min_resolution` | résolution minimale (`720`, `1080`, `2160`…) pour qu'un fichier existant soit livré tel quel. |
 | `languages` | langues audio exigées (ex. `["French"]`). |
+| `subtitles` | optionnel : sous-titres acceptés à la place (ex. `["French"]`). Un fichier sans la langue audio mais avec ces sous-titres est envoyé quand même (annoncé `VOSTFR`). Lus dans le mediaInfo de Radarr/Sonarr. |
 | `announce` | qualité affichée dans le titre de la release synthétique quand le titre doit d'abord être téléchargé. |
 
 Un profil du receveur sans correspondance provoque une erreur visible dans le panel. Définis un profil **`default`**, utilisé pour tous les profils non listés.

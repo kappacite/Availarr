@@ -2,6 +2,7 @@ import logging
 import os
 import threading
 import time
+from types import SimpleNamespace
 
 from availarr.common import Item, release_title as make_title
 from availarr.server.config import ServerConfig
@@ -54,7 +55,7 @@ class Jobs:
         name, year = lib.title(item)
         if all(satisfies(u.file, req) for u in units):
             own = original_title(units[0].file, req) if len(units) == 1 else None  # a season pack has many names
-            return {"title": own or make_title(name, year, item, file_tags(units[0].file)),
+            return {"title": own or make_title(name, year, item, file_tags(units[0].file, req)),
                     "size": sum(u.file.size for u in units)}
         gb = self.cfg.movie_gb if item.kind == "movie" else self.cfg.episode_gb * max(len(units), episodes)
         return {"title": make_title(name, year, item, req.announce), "size": int(gb * 10**9)}
@@ -149,6 +150,8 @@ class Jobs:
             job.state, job.ready_at = "ready", now
             job.units = [u.key for u in units]
             job.hashes = list(dict.fromkeys(job.hashes + lib.hashes(job.item, self._since(job), job.protected_units)))  # keep linked ones
+        elif job.hashes and self._linked_done(job.hashes):  # a pending job only has hashes linked by hand
+            job.state, job.ready_at = "ready", now
         elif now - job.created_at >= self.cfg.fail_days * 86400:
             job.state, job.error = "failed", f"Introuvable chez l'envoyeur après {self.cfg.fail_days:g} j"
         else:
@@ -156,10 +159,26 @@ class Jobs:
         self.store.update(job)
         return job
 
+    def _linked_done(self, hashes: list[str]) -> bool:
+        try:
+            ts = self.qbit.info(hashes) if self.qbit else {}
+        except Exception:  # noqa: BLE001 - qBittorrent down: next refresh
+            return False
+        return bool(ts) and all(t.progress >= 1 for t in ts.values())
+
     def _files(self, job: Job):
         if job.state != "ready" or job.deleted_at is not None:
             return []
-        return [u.file for u in self.lib(job.item).units(job.item) if u.file]
+        units, req = self.lib(job.item).units(job.item), self.requirement(job.b_profile)
+        if (units and req and all(satisfies(u.file, req) for u in units)) or not (self.qbit and job.hashes):
+            return [u.file for u in units if u.file]
+        # the arr has nothing right: a request made ready by linking a torrent by hand serves that torrent's files
+        return [SimpleNamespace(path=p, size=s) for h in job.hashes for p, s in self.qbit.files(h)]
+
+    def link(self, job: Job, hashes: list[str]) -> None:
+        """Torrents picked by hand on the panel; a request still waiting takes them as its download."""
+        self.store.set(job.id, hashes=hashes)
+        self.refresh(self.store.get(job.id))
 
     def status(self, job: Job) -> dict:
         if job.deleted_at is not None:

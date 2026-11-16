@@ -71,6 +71,9 @@ class FakeQbit:
     def all(self):
         return list(self.torrents.values())
 
+    def files(self, h):
+        return getattr(self, "content", {}).get(h, [])
+
     def seeding_seconds(self, h):
         return self.seed.get(h)
 

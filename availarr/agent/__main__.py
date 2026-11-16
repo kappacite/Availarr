@@ -43,6 +43,7 @@ def build(cfg, config_path="/config/agent.toml", restart=_restart):
 
 def main():
     logging.basicConfig(level=logging.INFO)
+    os.umask(0)  # folders the agent creates for B are 777 (files are chmod 777 once complete)
     path = os.environ.get("AVAILARR_CONFIG", "/config/agent.toml")
     if not os.path.exists(path):  # first run: web setup on the agent port, then carry on
         run_setup("agent", path, load_agent_config, port=8789)

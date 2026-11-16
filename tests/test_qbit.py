@@ -120,3 +120,15 @@ def test_all_lists_every_torrent():
     q = QBit("http://q", "u", "p", httpx.Client(transport=httpx.MockTransport(h), base_url="http://q"))
     ts = q.all()
     assert [t.hash for t in ts] == ["a" * 40] and ts[0].name == "X" and seen == [{}]
+
+
+def test_files_joins_save_path():
+    def h(req):
+        if req.url.path.endswith("/auth/login"):
+            return httpx.Response(200, text="Ok.")
+        if req.url.path.endswith("/torrents/info"):
+            return httpx.Response(200, json=[{"hash": "a" * 40, "save_path": "/data/torrents"}])
+        return httpx.Response(200, json=[{"name": "Show.S01/E01.mkv", "size": 7}])
+    from availarr.server.qbit import QBit
+    q = QBit("http://q", "u", "p", httpx.Client(transport=httpx.MockTransport(h), base_url="http://q"))
+    assert q.files("A" * 40) == [("/data/torrents/Show.S01/E01.mkv", 7)]

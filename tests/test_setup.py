@@ -20,7 +20,7 @@ SERVER_FORM = {
     "qbit_url": "http://q:8080", "qbit_user": "admin", "qbit_pass": "p",
     "keep_days": "7", "seed_days": "3", "fail_days": "7",
     "p_name": ["default", "HD-1080p"], "p_a": ["HD-1080p", "TV Bas Français"], "p_res": ["720", "1080"],
-    "p_lang": ["", "French"], "p_announce": ["1080p.WEB-DL", "MULTi.1080p.WEB-DL"],
+    "p_lang": ["", "French"], "p_subs": ["", "French, eng"], "p_announce": ["1080p.WEB-DL", "MULTi.1080p.WEB-DL"],
 }
 
 
@@ -35,6 +35,7 @@ def test_server_setup_writes_valid_config(tmp_path):
     assert r.status_code == 200 and saved == [1]
     cfg = load_server_config(str(path))
     assert cfg.radarr_url == "http://r:7878/radarr" and cfg.profiles["HD-1080p"].languages == ["French"]
+    assert cfg.profiles["HD-1080p"].subtitles == ["French", "eng"] and cfg.profiles["default"].subtitles == []
     assert cfg.profiles["default"].min_resolution == 720 and cfg.admin_password == "pw"
 
 
@@ -111,7 +112,7 @@ def test_form_values_roundtrip(tmp_path):
     assert v["admin_password"] == "" and v["qbit_pass"] == ""
     again = server_config(__import__("starlette.datastructures", fromlist=["FormData"]).FormData(
         [(k, x) for k, val in v.items() if k != "profiles" for x in [val]]
-        + [(f"p_{k}", p[k]) for p in v["profiles"] for k in ("a", "res", "lang", "announce")]
+        + [(f"p_{k}", p[k]) for p in v["profiles"] for k in ("a", "res", "lang", "subs", "announce")]
         + [("p_name", p["name"]) for p in v["profiles"]]))
     old = server_config(form)
     assert {**again, "admin_password": "pw", "qbittorrent": {**again["qbittorrent"], "password": "p"}} == old
